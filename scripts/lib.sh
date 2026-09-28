@@ -59,7 +59,8 @@ pip_install() {
 install_project() {
   local extras="${1:-service,observability,mcp}"
   step "installing dspy-jev[$extras]"
-  pip_install -e "$DSPY_JEV_ROOT[$extras]"
+  # Braces are required: `$VAR[...]` reads as an array subscript.
+  pip_install -e "${DSPY_JEV_ROOT}[${extras}]"
   ok "installed"
 }
 
