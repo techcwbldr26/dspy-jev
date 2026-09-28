@@ -68,3 +68,27 @@ def test_open_weight_names_preserve_declaration_order():
 def test_cloud_base_url_is_https_and_openai_shaped():
     assert models.OLLAMA_CLOUD_BASE_URL == "https://ollama.com/v1"
     assert models.OLLAMA_TAGS_URL.startswith("https://")
+
+
+def test_registry_names_are_the_exact_cloud_tags():
+    """The direct cloud API takes the name the listing returns, not the family.
+
+    ``deepseek-v4-pro`` 404s; ``deepseek-v4-pro:0813`` is what is served. Any
+    entry that needs a suffix must carry it here, with the bare spelling kept as
+    an alias so obvious configuration still resolves.
+    """
+    needs_suffix = {"deepseek-v4-pro", "mistral-large-3", "gpt-oss", "gemma4", "nemotron-3-nano"}
+    for spec in models.OLLAMA_CLOUD_MODELS:
+        assert spec.name not in needs_suffix, f"{spec.name} needs its version suffix"
+
+
+@pytest.mark.parametrize("bare", ["deepseek-v4-pro", "mistral-large-3", "gpt-oss"])
+def test_the_bare_spelling_still_resolves_through_an_alias(bare):
+    assert models.resolve(bare).name.startswith(bare)
+    assert ":" in models.resolve(bare).name
+
+
+def test_role_defaults_are_exact_tags():
+    for role in ("decision", "fast", "judge"):
+        name = models.default_for("ollama_cloud", role)
+        assert models.resolve(name).name == name, f"{role} default is an alias, not the exact tag"

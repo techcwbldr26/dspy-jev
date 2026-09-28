@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -91,13 +92,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             live = _fetch_ollama_tags()
             check("ollama.reachable", bool(live), f"{len(live)} cloud models listed")
             for role in ("decision", "fast", "judge"):
-                wanted = settings.model_for(role)
-                found = any(tag == wanted or tag.split(":")[0] == wanted.split(":")[0] for tag in live)
-                check(
-                    f"ollama.available.{role}",
-                    found,
-                    wanted if found else f"{wanted} is not in the live cloud listing (retired or renamed?)",
-                )
+                wanted = models.resolve(settings.model_for(role)).name
+                check(f"ollama.available.{role}", *_availability(wanted, live))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
             check("ollama.reachable", False, f"{type(exc).__name__}: {exc}")
 
@@ -123,6 +119,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 # --- models ---------------------------------------------------------------------
 
 
+def _availability(wanted: str, live: list[str]) -> tuple[bool, str]:
+    """Check one model against the live listing.
+
+    The cloud API wants the exact name the listing returns, so a family-level
+    near-miss (``deepseek-v4-pro`` when the listing says ``deepseek-v4-pro:0813``)
+    is a failure that names the right tag -- not a pass. Treating it as a pass is
+    how a 404 at the first real request gets missed here.
+    """
+    if wanted in live:
+        return True, wanted
+    family = wanted.split(":")[0]
+    near = [tag for tag in live if tag.split(":")[0] == family]
+    if near:
+        return False, f"{wanted} is not served exactly; the listing offers {', '.join(sorted(near))}"
+    return False, f"{wanted} is not in the live cloud listing (retired or renamed?)"
+
+
 def cmd_models(args: argparse.Namespace) -> int:
     """List the registry, and optionally reconcile it with the live cloud listing."""
     settings = _settings_from_args(args)
@@ -143,7 +156,7 @@ def cmd_models(args: argparse.Namespace) -> int:
             "notes": spec.notes,
         }
         if live is not None and spec.provider == "ollama_cloud":
-            row["live"] = any(t == spec.name or t.split(":")[0] == spec.name.split(":")[0] for t in live)
+            row["live"] = spec.name in live
         rows.append(row)
 
     _emit(
@@ -210,6 +223,49 @@ def cmd_triage(args: argparse.Namespace) -> int:
     dspy.configure(lm=build_lm("decision", settings=settings))
     _emit(decision_record(TicketTriageProgram()(ticket=args.ticket)), pretty=not args.compact)
     return EXIT_OK
+
+
+# --- guard ----------------------------------------------------------------------
+
+
+def cmd_guard(args: argparse.Namespace) -> int:
+    """Gate a command, then run it only if the gate allows.
+
+    This is the enforcement primitive for harnesses with no tool-call hook of
+    their own. Asking the gate and then running the command separately leaves a
+    window in which the verdict is advice; ``guard`` closes it, because the only
+    path to execution runs through an allow.
+    """
+    import os
+
+    from dspy_jev.enforce import Enforcer, ToolCall
+
+    if not args.command:
+        _emit({"error": "NothingToRun", "detail": "Pass the command after `--`."})
+        return EXIT_ERROR
+
+    settings = _settings_from_args(args)
+    call = ToolCall(tool="bash", arguments={"command": " ".join(args.command)})
+    enforcer = Enforcer(
+        settings=settings,
+        service_url=args.service_url or os.environ.get("DSPY_JEV_SERVICE_URL"),
+        # Without a person to answer, `needs_review` and `clarify` are a refusal.
+        interactive=False,
+    )
+    verdict = enforcer.evaluate(call, task=args.task, context=args.context)
+
+    if verdict.blocked:
+        _emit({"ran": False, **verdict.to_dict(), "command": args.command})
+        return EXIT_ERROR if verdict.error else EXIT_HOLD
+
+    if not args.quiet:
+        print(
+            json.dumps({"ran": True, "gated": verdict.gated, "route": verdict.route or "skipped"}),
+            file=sys.stderr,
+        )
+    # The caller's own command, now gated: the only path here is through an allow.
+    completed = subprocess.run(args.command)
+    return completed.returncode
 
 
 # --- calibrate / evaluate -------------------------------------------------------
@@ -329,6 +385,22 @@ def build_parser() -> argparse.ArgumentParser:
     decide.add_argument("--compact", action="store_true", help="Single-line JSON.")
     decide.set_defaults(func=cmd_decide)
 
+    guard = sub.add_parser(
+        "guard",
+        help="Gate a command and run it only if allowed. Exit 10 when held, 1 when the gate fails.",
+    )
+    guard.add_argument("--task", default="No task was recorded for this invocation.")
+    guard.add_argument("--context", default="")
+    guard.add_argument("--service-url", help="Use a running dspy-jev service instead of this process.")
+    guard.add_argument("--quiet", action="store_true", help="Do not report an allowed run on stderr.")
+    guard.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        metavar="-- COMMAND ...",
+        help="The command to gate. Everything after `--` is passed through verbatim.",
+    )
+    guard.set_defaults(func=cmd_guard)
+
     triage = sub.add_parser("triage", help="Score a support ticket.")
     triage.add_argument("--ticket", required=True)
     triage.add_argument("--compact", action="store_true")
@@ -375,6 +447,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if getattr(args, "command", None) and args.command[0] == "--":
+        args.command = args.command[1:]
     try:
         return int(args.func(args))
     except KeyboardInterrupt:  # pragma: no cover

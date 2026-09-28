@@ -1,0 +1,16 @@
+name: decision-gate
+version: 0.1.0
+description: "TechCourses team agent: decision-gate (calibrated action gating via dspy-jev)"
+hermes_requires: ">=0.19.0"
+author: "TechCourses"
+license: "Proprietary"
+env_requires:
+  - name: OLLAMA_API_KEY
+    description: "Ollama Cloud API key (ollama.com -> Settings -> Keys)"
+    required: true
+  - name: DSPY_JEV_SERVICE_URL
+    description: "Base URL of the running dspy-jev decision service (default http://127.0.0.1:8080)"
+    required: false
+  - name: DSPY_JEV_SERVICE_API_KEY
+    description: "Sent as X-API-Key when the dspy-jev service is configured to require one"
+    required: false

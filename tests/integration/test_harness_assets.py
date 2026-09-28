@@ -123,44 +123,96 @@ def test_pi_mcp_config_uses_an_http_url_not_a_command():
 
 
 # --- hermes profile -------------------------------------------------------------
+# The real shape, taken from techcwbldr26/hermes-agent-profiles: each profile is a
+# self-contained distribution directory that `hermes profile install` consumes.
+
+PROFILE = HARNESSES / "hermes-agent" / "decision-gate"
 
 
-def test_hermes_profile_declares_the_decide_tool():
-    profile = yaml.safe_load((HARNESSES / "hermes-agent" / "profiles" / "dspy-jev.yaml").read_text())
-    decide = next(tool for tool in profile["tools"] if tool["name"] == "jev_decide")
-    assert decide["endpoint"] == "POST /v1/decide"
-    assert set(decide["parameters"]) == {"task", "proposed_action", "context", "autonomy_threshold"}
-    assert decide["parameters"]["task"]["required"] is True
-    assert decide["parameters"]["context"]["required"] is False
+def load_yaml(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def test_hermes_profile_treats_a_gate_error_as_a_hold():
-    """The one rule that must never be 'fail open'."""
-    profile = yaml.safe_load((HARNESSES / "hermes-agent" / "profiles" / "dspy-jev.yaml").read_text())
-    assert profile["policy"]["on_error"] == "halt_and_report"
-    assert profile["policy"]["on_hold"] == "halt_and_report"
+def test_the_profile_is_a_self_contained_distribution():
+    """`hermes profile install ./decision-gate` needs all of this at the root."""
+    for relative in (
+        "distribution.yaml",
+        "config.yaml",
+        "SOUL.md",
+        "README.md",
+        "docs/README.md",
+        "skills/decision-gate/SKILL.md",
+        ".gitignore",
+    ):
+        assert (PROFILE / relative).exists(), f"missing {relative}"
 
 
-def test_hermes_profile_declares_no_model_credentials():
-    """The service holds the provider key; the harness holds only a service key."""
-    text = (HARNESSES / "hermes-agent" / "profiles" / "dspy-jev.yaml").read_text()
-    assert "OLLAMA_API_KEY" not in text
-    assert "ANTHROPIC_API_KEY" not in text
+def test_distribution_declares_what_hermes_reads():
+    distribution = load_yaml(PROFILE / "distribution.yaml")
+    assert distribution["name"] == "decision-gate" == PROFILE.name
+    assert distribution["hermes_requires"].startswith(">=")
+    required = {entry["name"] for entry in distribution["env_requires"] if entry.get("required")}
+    assert required == {"OLLAMA_API_KEY"}, "only the provider key is mandatory"
 
 
-def test_hermes_profile_endpoints_exist_in_the_service(settings, allow_lm, configured_dspy):
-    """The profile is only useful if the paths it names are real."""
-    from fastapi.testclient import TestClient
+def test_the_profile_is_named_by_role_not_by_model():
+    """Repo convention: models change, roles do not."""
+    text = (PROFILE / "distribution.yaml").read_text() + PROFILE.name
+    for model_family in ("glm", "kimi", "minimax", "deepseek", "nemotron", "claude"):
+        assert model_family not in text.lower(), f"{model_family} appears in the profile's name or id"
 
-    from dspy_jev.service.app import create_app
 
-    profile = yaml.safe_load((HARNESSES / "hermes-agent" / "profiles" / "dspy-jev.yaml").read_text())
-    declared = {tool["endpoint"].split()[1] for tool in profile["tools"]}
-    declared |= {value.split()[1] for value in profile["health"].values()}
+def test_config_sets_a_model_and_provider_and_no_base_url():
+    """A hand-set base_url under `model:` causes HTTP 404s with ollama-cloud."""
+    config = load_yaml(PROFILE / "config.yaml")
+    assert set(config) == {"model"}
+    assert config["model"]["provider"] == "ollama-cloud"
+    assert config["model"]["default"].endswith(":cloud")
+    assert "base_url" not in config["model"]
 
-    with TestClient(create_app(settings, lm=allow_lm)) as client:
-        available = set(client.get("/openapi.json").json()["paths"])
-    assert declared <= available, f"profile names endpoints the service does not serve: {declared - available}"
+
+def test_the_profile_model_is_open_weight():
+    from dspy_jev import models
+
+    family = load_yaml(PROFILE / "config.yaml")["model"]["default"].split(":")[0]
+    known = {name.split(":")[0] for name in models.open_weight_names()}
+    assert family in known, f"{family} is not an open-weight model in the registry"
+
+
+def test_the_profile_gitignore_excludes_every_secret_path():
+    """The repo's pre-commit hook blocks these; the profile must too."""
+    ignored = set((PROFILE / ".gitignore").read_text().split())
+    assert {".env", "auth.json", "memories/", "sessions/"} <= ignored
+
+
+def test_the_profile_holds_no_model_credentials():
+    for path in PROFILE.rglob("*"):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            assert "ANTHROPIC_API_KEY" not in text, path
+            assert "sk-" not in text, path
+
+
+def test_the_skill_enforces_rather_than_advises():
+    """The whole point of the rewrite: the skill wraps commands in `guard`."""
+    meta, body = parse_frontmatter(PROFILE / "skills" / "decision-gate" / "SKILL.md")
+    assert meta["name"] == "decision-gate"
+    assert "dspy-jev guard" in body
+    assert "did **not** run" in body or "did not run" in body
+
+
+def test_the_skill_documents_all_four_routes_and_the_exit_codes():
+    body = parse_frontmatter(PROFILE / "skills" / "decision-gate" / "SKILL.md")[1]
+    for route in ("auto_execute", "needs_review", "clarify", "block"):
+        assert route in body
+    for code in ("`0`", "`10`", "`1`"):
+        assert code in body
+
+
+def test_the_soul_forbids_the_gate_from_acting_or_granting():
+    soul = (PROFILE / "SOUL.md").read_text().lower()
+    assert "never carries an action out" in soul or "decides; the caller acts" in soul
+    assert "out of scope" in soul
 
 
 # --- preambles ------------------------------------------------------------------
@@ -173,6 +225,8 @@ def test_hermes_profile_endpoints_exist_in_the_service(settings, allow_lm, confi
         HARNESSES / "pi" / "prompts" / "gate.md",
         HARNESSES / "claude-code" / "CLAUDE.md",
         HARNESSES / "pi" / "AGENTS.md",
+        HARNESSES / "pi" / "extensions" / "dspy-jev-gate" / "README.md",
+        HARNESSES / "hermes-agent" / "decision-gate" / "README.md",
     ],
     ids=lambda p: str(p.relative_to(HARNESSES)),
 )
@@ -189,3 +243,53 @@ def test_preambles_forbid_rewording_to_pass_the_gate():
     ):
         text = path.read_text(encoding="utf-8").lower()
         assert "reword" in text or "rephrasing" in text, path
+
+
+# --- enforcement assets ----------------------------------------------------------
+
+
+def test_claude_code_registers_the_hook_on_acting_tools_only():
+    """Read/Glob/Grep are absent on purpose: no process spawned per read."""
+    settings = json.loads((HARNESSES / "claude-code" / ".claude" / "settings.json").read_text())
+    entries = settings["hooks"]["PreToolUse"]
+    assert len(entries) == 1
+    matcher = entries[0]["matcher"]
+    for acting in ("Bash", "Write", "Edit", "WebFetch", "mcp__.*"):
+        assert acting in matcher
+    for reading in ("Read", "Glob", "Grep"):
+        assert f"{reading}|" not in matcher and not matcher.endswith(reading)
+    hook = entries[0]["hooks"][0]
+    assert hook["type"] == "command"
+    assert hook["command"].endswith(".claude/hooks/dspy_jev_gate.py")
+    assert hook["timeout"] >= 30
+
+
+def test_claude_code_hook_script_is_executable_and_self_contained():
+    hook = HARNESSES / "claude-code" / ".claude" / "hooks" / "dspy_jev_gate.py"
+    assert hook.stat().st_mode & 0o111
+    source = hook.read_text()
+    assert "permissionDecision" in source
+    assert '"deny"' in source
+
+
+def test_the_pi_extension_blocks_on_the_tool_call_event():
+    source = (HARNESSES / "pi" / "extensions" / "dspy-jev-gate" / "index.ts").read_text()
+    assert 'pi.on("tool_call"' in source
+    # Fail-closed: the catch inside the tool_call handler must block, not fall through.
+    handler = source.split('pi.on("tool_call"', 1)[1].split("pi.registerCommand", 1)[0]
+    assert "block: true" in handler
+    catch_block = handler.split("} catch (error) {", 1)[1].split("}", 1)[0]
+    assert "block: true" in catch_block
+
+
+def test_every_harness_documents_that_a_gate_failure_is_a_hold():
+    """The one rule that must never be 'fail open', stated in all three places."""
+    sources = [
+        HARNESSES / "hermes-agent" / "prompts" / "system-preamble.md",
+        HARNESSES / "pi" / "extensions" / "dspy-jev-gate" / "README.md",
+        HARNESSES / "claude-code" / ".claude" / "hooks" / "dspy_jev_gate.py",
+    ]
+    for path in sources:
+        # Collapse wrapping: these are prose files, so the phrase spans line breaks.
+        text = " ".join(path.read_text().lower().split())
+        assert "is not permission" in text, path

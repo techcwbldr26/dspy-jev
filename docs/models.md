@@ -35,11 +35,27 @@ retirement is a one-line change.
 |---|---|---|
 | `decision` | `glm-5.3` | `claude-sonnet-5-5` |
 | `fast` | `glm-5.3-flash` | `claude-haiku-4-5-20251001` |
-| `judge` | `deepseek-v4-pro` | `claude-opus-5-5` |
+| `judge` | `deepseek-v4-pro:0813` | `claude-opus-5-5` |
 
-Open-weight models in the registry: `glm-5.3`, `deepseek-v4-pro`, `kimi-k3`,
-`minimax-m3`, `nemotron-3-ultra`, `glm-5.3-flash`, `deepseek-v4.1-flash`,
-`gpt-oss:120b`, `gpt-oss:20b`, `mistral-large-3`, `nemotron-3-super`.
+Open-weight models in the registry: `glm-5.3`, `deepseek-v4-pro:0813`,
+`kimi-k3`, `minimax-m3`, `nemotron-3-ultra`, `glm-5.3-flash`,
+`deepseek-v4.1-flash`, `gpt-oss:120b`, `gpt-oss:20b`, `mistral-large-3:675b`,
+`nemotron-3-super`.
+
+### Three naming conventions, and which to use where
+
+The same model is spelled three ways depending on how you reach it. Getting this
+wrong produces a 404 that reads like a network problem.
+
+| Reached via | Spelling | Used by |
+|---|---|---|
+| Direct cloud API | the exact tag from `/api/tags`, e.g. `deepseek-v4-pro:0813` | this registry, `dspy-jev` |
+| Signed-in local Ollama server | `<model>:cloud`, e.g. `glm-5.3:cloud` | the hermes-agent profile's `ollama-cloud` provider |
+| LiteLLM provider prefix | `openai/<exact tag>` plus `api_base` | what `build_lm` constructs |
+
+The registry stores exact tags and keeps the bare spelling as an alias, so
+`DSPY_JEV_DECISION_MODEL=deepseek-v4-pro` still resolves — but what goes on the
+wire is the suffixed name.
 
 Override per role without touching the code:
 
@@ -56,8 +72,13 @@ have used. The registry is therefore never trusted on its own:
 
 ```bash
 dspy-jev models --live    # reconciles against https://ollama.com/api/tags
-dspy-jev doctor           # fails if a configured model is no longer listed
+dspy-jev doctor           # fails if a configured model is no longer served
 ```
+
+`doctor` requires an **exact** match. A family-level near miss —
+`deepseek-v4-pro` when the listing offers `deepseek-v4-pro:0813` — fails and
+names the served tag, rather than passing and leaving the 404 for the first real
+request.
 
 `.github/workflows/calibration.yml` runs `doctor` weekly, so a retirement
 surfaces as a red build rather than as a production error.

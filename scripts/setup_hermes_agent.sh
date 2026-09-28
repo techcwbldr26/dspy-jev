@@ -28,13 +28,27 @@ cat <<NEXT
 
 hermes-agent wiring
 -------------------
-1. Start the gate:            dspy-jev serve
-2. Copy the tool profile:     harnesses/hermes-agent/profiles/dspy-jev.yaml
-                              -> your hermes-agent profiles directory
+1. Start the gate:
+       dspy-jev serve
+
+2. Install the profile distribution:
+       cp -R harnesses/hermes-agent/decision-gate /path/to/hermes-agent-profiles/
+       cd /path/to/hermes-agent-profiles
+       hermes profile install ./decision-gate --alias
+       printf 'OLLAMA_API_KEY=<your key>\n' > decision-gate/.env
+
 3. Add to the system prompt:  harnesses/hermes-agent/prompts/system-preamble.md
 4. Or use MCP instead:        harnesses/hermes-agent/.mcp.json
 
-The harness holds no model credentials: only DSPY_JEV_SERVICE_URL and, if you
+Enforcement runs at the process boundary, since Hermes has no tool-call hook
+this project can rely on:
+
+       dspy-jev guard --task "$TASK" -- <the command>
+
+Exit 0 = allowed and ran; 10 = held and did NOT run; 1 = the gate failed and the
+command did NOT run.
+
+The profile holds no model credentials: only DSPY_JEV_SERVICE_URL and, if you
 set one, DSPY_JEV_SERVICE_API_KEY. The service holds the Ollama key.
 
 Calibrate before relying on it:

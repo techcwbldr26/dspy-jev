@@ -12,6 +12,13 @@ retirement schedule of models you have used). ``dspy-jev doctor`` resolves the
 configured names against the live ``https://ollama.com/api/tags`` listing rather
 than trusting this table, so a retirement surfaces as a failed check instead of a
 runtime error.
+
+Names here are the **exact** tags that listing returns, because that is what the
+direct cloud API accepts -- ``deepseek-v4-pro:0813``, not ``deepseek-v4-pro``.
+The unsuffixed spelling is kept as an alias so configuration written the obvious
+way still resolves. A signed-in local Ollama server uses a different convention
+again (``glm-5.3:cloud``), which is what the hermes-agent profile's
+``ollama-cloud`` provider expects.
 """
 
 from __future__ import annotations
@@ -63,10 +70,11 @@ OLLAMA_CLOUD_MODELS: tuple[ModelSpec, ...] = (
         supports_thinking=True,
     ),
     ModelSpec(
-        name="deepseek-v4-pro",
+        name="deepseek-v4-pro:0813",
         provider="ollama_cloud",
         notes="Frontier MoE with three reasoning modes and a large context window.",
         supports_thinking=True,
+        aliases=("deepseek-v4-pro",),
     ),
     ModelSpec(
         name="kimi-k3",
@@ -112,9 +120,10 @@ OLLAMA_CLOUD_MODELS: tuple[ModelSpec, ...] = (
         supports_thinking=True,
     ),
     ModelSpec(
-        name="mistral-large-3",
+        name="mistral-large-3:675b",
         provider="ollama_cloud",
         notes="General-purpose multimodal MoE for production workloads.",
+        aliases=("mistral-large-3",),
     ),
     ModelSpec(
         name="nemotron-3-super",
@@ -157,7 +166,7 @@ DEFAULT_ROLES: dict[Provider, dict[str, str]] = {
     "ollama_cloud": {
         "decision": "glm-5.3",
         "fast": "glm-5.3-flash",
-        "judge": "deepseek-v4-pro",
+        "judge": "deepseek-v4-pro:0813",
     },
     "anthropic": {
         "decision": "claude-sonnet-5-5",

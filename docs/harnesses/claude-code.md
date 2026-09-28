@@ -29,6 +29,47 @@ jev_status      # harness: claude-code, model: anthropic/claude-sonnet-5-5
 `.mcp.json` launches the `dspy-jev` command, so the venv's `bin` directory must
 be on `PATH` in the environment that starts Claude Code.
 
+## Enforcement: the PreToolUse hook
+
+The skill and the MCP tools are advice. The hook is a control.
+
+`scripts/setup_claude_code.sh` installs `.claude/hooks/dspy_jev_gate.py` and
+registers it in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|NotebookEdit|WebFetch|Agent|Workflow|mcp__.*",
+        "hooks": [{ "type": "command",
+                    "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/dspy_jev_gate.py",
+                    "timeout": 60 }]
+      }
+    ]
+  }
+}
+```
+
+Claude Code runs the hook before a matched tool call, passing the call as JSON
+on stdin and reading a decision from stdout:
+
+| Gate says | Hook returns | Effect |
+|---|---|---|
+| `auto_execute` | no output | Claude Code's normal permission rules apply |
+| `needs_review`, `clarify` | `permissionDecision: ask` | You are asked to approve |
+| `block` | `permissionDecision: deny` | The tool does not run |
+| unreachable, timeout, crash | `permissionDecision: deny` | The tool does not run |
+
+`Read`, `Glob` and `Grep` are deliberately absent from the matcher: the hook
+would skip them anyway, and not matching them avoids spawning a process per
+read. Read-only shell commands (`ls`, `git status`, `cat`) are skipped inside
+the hook for the same reason.
+
+The hook records the MCP server's declared `source` in the context it sends to
+the gate, so trust follows the operator's configuration rather than a server's
+chosen name.
+
 ## Tools
 
 | Tool | Use |

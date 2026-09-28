@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "Enforces the dspy-jev decision gate as a PreToolUse hook: a held action does",
+    "not run, rather than being reported to the model as advice.",
+    "",
+    "The matcher lists the tools that can act on the world. Read, Glob and Grep are",
+    "deliberately absent -- the hook would skip them anyway, and not matching them",
+    "avoids spawning a process per read.",
+    "",
+    "Set DSPY_JEV_SERVICE_URL to use a running service (one calibration artifact",
+    "shared by every harness); leave it unset to run the gate in-process, which",
+    "needs ANTHROPIC_API_KEY here."
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|NotebookEdit|WebFetch|Agent|Workflow|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/dspy_jev_gate.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "DSPY_JEV_HARNESS": "claude-code",
+    "DSPY_JEV_SERVICE_URL": "http://127.0.0.1:8080"
+  }
+}

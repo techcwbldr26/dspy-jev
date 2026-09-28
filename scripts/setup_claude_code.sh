@@ -21,10 +21,21 @@ write_env_file "$HARNESS" \
   "DSPY_JEV_AUTONOMY_THRESHOLD=0.85" \
   "DSPY_JEV_MLFLOW_ENABLED=true"
 
-step "installing the skill and MCP config into $TARGET"
-mkdir -p "$TARGET/.claude/skills"
+step "installing the skill, the PreToolUse hook and the MCP config into $TARGET"
+mkdir -p "$TARGET/.claude/skills" "$TARGET/.claude/hooks"
 cp -R "$DSPY_JEV_ROOT/harnesses/claude-code/.claude/skills/dspy-jev" "$TARGET/.claude/skills/"
+cp "$DSPY_JEV_ROOT/harnesses/claude-code/.claude/hooks/dspy_jev_gate.py" "$TARGET/.claude/hooks/"
+chmod +x "$TARGET/.claude/hooks/dspy_jev_gate.py"
 ok "skill -> $TARGET/.claude/skills/dspy-jev/SKILL.md"
+ok "hook  -> $TARGET/.claude/hooks/dspy_jev_gate.py"
+
+if [[ -f "$TARGET/.claude/settings.json" ]]; then
+  warn "$TARGET/.claude/settings.json exists; merge the PreToolUse block from"
+  warn "  harnesses/claude-code/.claude/settings.json by hand -- without it the hook never runs"
+else
+  cp "$DSPY_JEV_ROOT/harnesses/claude-code/.claude/settings.json" "$TARGET/.claude/settings.json"
+  ok "hooks -> $TARGET/.claude/settings.json (PreToolUse enforcement)"
+fi
 
 if [[ -f "$TARGET/.mcp.json" ]]; then
   warn "$TARGET/.mcp.json exists; merge harnesses/claude-code/.mcp.json by hand"
@@ -46,7 +57,14 @@ cat <<NEXT
 
 Claude Code wiring
 ------------------
+Enforcement is on: the PreToolUse hook denies a held tool call, so it does not
+run. Start the service it talks to (or unset DSPY_JEV_SERVICE_URL in
+.claude/settings.json to run the gate in-process):
+
+    dspy-jev serve &
+
 Restart Claude Code in $TARGET, then:
+    /hooks            confirm the PreToolUse hook is registered
     /mcp              confirm the dspy-jev server is connected
     jev_status        confirm the model and calibration state
 

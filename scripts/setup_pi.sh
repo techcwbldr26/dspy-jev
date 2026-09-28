@@ -22,12 +22,14 @@ write_env_file "$HARNESS" \
   "DSPY_JEV_AUTONOMY_THRESHOLD=0.85" \
   "DSPY_JEV_MLFLOW_ENABLED=true"
 
-step "installing the Pi skill and prompt template"
-mkdir -p "$PI_AGENT_DIR/skills" "$PI_AGENT_DIR/prompts"
+step "installing the Pi skill, prompt template and enforcement extension"
+mkdir -p "$PI_AGENT_DIR/skills" "$PI_AGENT_DIR/prompts" "$PI_AGENT_DIR/extensions"
 cp -R "$DSPY_JEV_ROOT/harnesses/pi/skills/dspy-jev" "$PI_AGENT_DIR/skills/"
 cp "$DSPY_JEV_ROOT/harnesses/pi/prompts/gate.md" "$PI_AGENT_DIR/prompts/"
-ok "skill  -> $PI_AGENT_DIR/skills/dspy-jev/SKILL.md"
-ok "prompt -> $PI_AGENT_DIR/prompts/gate.md  (type /gate in Pi)"
+cp -R "$DSPY_JEV_ROOT/harnesses/pi/extensions/dspy-jev-gate" "$PI_AGENT_DIR/extensions/"
+ok "skill     -> $PI_AGENT_DIR/skills/dspy-jev/SKILL.md"
+ok "prompt    -> $PI_AGENT_DIR/prompts/gate.md  (type /gate in Pi)"
+ok "extension -> $PI_AGENT_DIR/extensions/dspy-jev-gate/  (blocks held tool calls)"
 
 if [[ -f "$PI_AGENT_DIR/models.json" ]]; then
   warn "$PI_AGENT_DIR/models.json exists; merge harnesses/pi/config/models.json by hand"
@@ -47,9 +49,17 @@ shell that starts Pi:
 
     export PATH="$VENV_DIR/bin:\$PATH"
 
+Enforcement is on: the extension handles Pi's tool_call event, so a held tool
+call is blocked rather than reported. Start the service it talks to:
+
+    dspy-jev serve &
+    export DSPY_JEV_SERVICE_URL=http://127.0.0.1:8080
+
 Then, in Pi:
+    /gate-status         where the gate is, and whether it answers
     /skill:dspy-jev      force-load the gate's instructions
     /gate                run the gate prompt template
+    /gate-off            stop enforcing for this session
 
 Optional MCP route (needs pi-mcp-adapter):
     dspy-jev serve &

@@ -89,12 +89,40 @@ The adapter takes an HTTP `url` and exposes `jev_decide`, `jev_triage` and
 `jev_status` as direct tools. The CLI route is simpler and is what the skill
 uses; this exists for setups that already standardise on MCP.
 
-## Extending it
+## Enforcement: the extension
 
-Pi's own answer to a missing feature is to build it. Two worth having:
+The skill is advice — the model can ignore it. The extension is a control.
 
-- A **permission-gate extension** that calls `dspy-jev decide` before `bash`
-  runs, so the gate is enforced rather than advisory. See Pi's
-  `examples/extensions/permission-gate.ts`.
-- A **status-bar item** showing the last verdict and `P(safe)`, so the current
-  posture is visible without scrolling.
+```bash
+cp -R harnesses/pi/extensions/dspy-jev-gate ~/.pi/agent/extensions/
+dspy-jev serve &
+export DSPY_JEV_SERVICE_URL=http://127.0.0.1:8080
+```
+
+It handles Pi's `tool_call` event, which can block a tool before it runs, and
+returns `{ block: true, reason }` on a hold. Pi also treats a handler that
+throws as a block, so there is no path where a failure becomes permission.
+
+| Route | Behaviour |
+|---|---|
+| `auto_execute` | Runs |
+| `needs_review`, `clarify` | Pi asks you; declining blocks the call |
+| `block` | Blocked, with the reasons shown to the model |
+| gate unreachable | Blocked |
+
+Commands: `/gate-status` (where the gate is and whether it answers right now),
+`/gate-off` and `/gate-on`.
+
+Reads, globs and read-only shell commands skip the gate entirely. The triage
+rules are duplicated in TypeScript here and in Python in `src/dspy_jev/enforce.py`;
+`tests/integration/test_enforcement_parity.py` drives both over the same 49 cases
+and fails on any disagreement, so they cannot drift apart silently.
+
+Without the extension, `dspy-jev guard -- <command>` gates a single command at
+the process boundary instead.
+
+## Extending it further
+
+A **status-bar item** showing the last verdict and `P(safe)` would make the
+current posture visible without scrolling. Pi's renderer registration and
+`ctx.ui` cover it.

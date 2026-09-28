@@ -155,3 +155,78 @@ def _gate(settings: Settings, evidence=None):
 
     dspy.configure(lm=stub_lm(evidence or gate_evidence()))
     return ActionGateProgram(settings=settings)
+
+
+# --- live model availability -----------------------------------------------------
+
+LIVE = ["glm-5.3", "glm-5.3-flash", "deepseek-v4-pro:0813", "gpt-oss:120b"]
+
+
+def test_an_exact_tag_is_available():
+    assert cli._availability("glm-5.3", LIVE) == (True, "glm-5.3")
+
+
+def test_a_family_near_miss_fails_and_names_the_served_tag():
+    """Passing on a near miss is how a 404 at the first real request gets missed."""
+    ok, detail = cli._availability("deepseek-v4-pro", LIVE)
+    assert ok is False
+    assert "deepseek-v4-pro:0813" in detail
+
+
+def test_a_retired_model_fails():
+    ok, detail = cli._availability("kimi-k1", LIVE)
+    assert ok is False
+    assert "not in the live cloud listing" in detail
+
+
+def test_doctor_reports_a_retired_model_as_a_failure(capsys, cli_env, monkeypatch):
+    monkeypatch.setattr(cli, "_fetch_ollama_tags", lambda *a, **k: ["some-other-model"])
+    code, body = run(capsys, ["doctor"])
+    assert code == cli.EXIT_ERROR
+    availability = [c for c in body["checks"] if c["check"].startswith("ollama.available.")]
+    assert availability and all(c["ok"] is False for c in availability)
+
+
+def test_doctor_passes_when_every_configured_model_is_served(capsys, cli_env, monkeypatch):
+    from dspy_jev import models as registry
+
+    served = [registry.resolve(registry.default_for("ollama_cloud", r)).name for r in ("decision", "fast", "judge")]
+    monkeypatch.setattr(cli, "_fetch_ollama_tags", lambda *a, **k: served)
+    _, body = run(capsys, ["doctor"])
+    availability = [c for c in body["checks"] if c["check"].startswith("ollama.available.")]
+    assert len(availability) == 3
+    assert all(c["ok"] for c in availability)
+
+
+def test_models_live_marks_only_exact_matches(capsys, cli_env, monkeypatch):
+    monkeypatch.setattr(cli, "_fetch_ollama_tags", lambda *a, **k: ["glm-5.3"])
+    _, body = run(capsys, ["models", "--live"])
+    by_name = {row["name"]: row for row in body["models"] if row["provider"] == "ollama_cloud"}
+    assert by_name["glm-5.3"]["live"] is True
+    assert by_name["deepseek-v4-pro:0813"]["live"] is False
+
+
+# --- guard -----------------------------------------------------------------------
+
+
+def test_guard_without_a_command_is_an_error(capsys, cli_env):
+    code, body = run(capsys, ["guard", "--task", "t"])
+    assert code == cli.EXIT_ERROR
+    assert body["error"] == "NothingToRun"
+
+
+def test_guard_strips_the_argparse_separator(capsys, cli_env, monkeypatch):
+    """`--` reaches REMAINDER as a literal, and must not become argv[0]."""
+    seen = {}
+
+    class Recorder:
+        returncode = 0
+
+    def fake_run(command, *a, **k):
+        seen["command"] = command
+        return Recorder()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    code = cli.main(["guard", "--task", "t", "--", "echo", "hi"])
+    assert code == 0
+    assert seen["command"] == ["echo", "hi"]

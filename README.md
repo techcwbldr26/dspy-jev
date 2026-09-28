@@ -107,6 +107,27 @@ all. A harness can raise its own bar without recalibrating. And during an
 incident you change `DSPY_JEV_AUTONOMY_THRESHOLD` and it takes effect on the
 next request.
 
+### It blocks, rather than suggesting
+
+A verdict the agent can ignore is not a control. Each harness gets a real
+interception point:
+
+| Harness | Where it hooks | What a hold does |
+|---|---|---|
+| Claude Code | `PreToolUse` hook | Returns `permissionDecision: deny`; the tool never runs |
+| Pi | `tool_call` extension event | Returns `{ block: true }`; the tool never runs |
+| Any harness | `dspy-jev guard -- <cmd>` | Gates the command and execs only on allow |
+
+Reads, globs and read-only shell commands (`ls`, `git status`, `cat`) skip the
+gate entirely — no model call, no latency — while anything that writes, reaches
+the network, or is simply unrecognised gets checked. A read-only command stops
+being read-only the moment it redirects, pipes into a shell, chains with `&&`,
+or mentions `curl` or `sudo`.
+
+Failure is a hold. An unreachable service, a timeout, a missing credential, a
+crash in the hook itself: every one denies. A gate that fails open is not a
+gate, and an error is exactly when one would be most useful to an attacker.
+
 ### One gate, three harnesses
 
 Three harnesses each embedding DSPy means three calibration artifacts, three
@@ -165,7 +186,8 @@ carry user data — and credential-shaped keys are redacted at any depth.
 | **Another hop on the critical path** | The gate sits in front of every risky step. It adds latency, and it can be down. The cache and the "do not call it for in-scope reads" rule are the mitigations. |
 | **Two artifacts to keep in step** | Open-weight and Claude backends produce differently-shaped distributions, so each harness family needs its own calibration and its own recalibration. |
 | **Cloud models get retired** | Ollama retires models on a schedule. `doctor` and a weekly workflow catch it, but a retirement means recalibrating. |
-| **Advisory unless enforced** | The gate returns a verdict; the harness decides whether to obey. Real enforcement needs a permission hook (a Pi extension, a hermes-agent policy), and this repository ships the prompts and the profile, not the hook. |
+| **Enforcement is per-harness** | Each harness needs its own interception point, and they are only as good as that harness's hook surface. The Claude Code `PreToolUse` hook and the Pi `tool_call` handler are true controls; `dspy-jev guard` covers harnesses with no hook at all, but only for commands actually run through it. |
+| **Triage exists twice** | The Python and TypeScript classifiers must agree, or one harness gates something the other does not. A parity test over 49 cases fails on any disagreement, but it is a test, not a shared implementation. |
 | **A gate can be talked around** | The signature says to treat inputs as data, there is a labelled row for it and tests that the preambles forbid rewording, but an agent that rephrases until it passes is a real failure mode. Log and review verdicts. |
 | **Bootstrap cost** | Datasets, thresholds, a service, a runbook. For a two-person project running one agent, a hard-coded deny-list is cheaper and you should use that instead. |
 
@@ -175,52 +197,47 @@ carry user data — and credential-shaped keys are redacted at any depth.
 
 Roughly in order of value per unit of work.
 
-**1. Enforce, rather than advise.** The biggest gap. A Pi permission-gate
-extension that calls `dspy-jev decide` before `bash` runs, and the equivalent
-hook in hermes-agent, turn a recommendation into a control. Pi's
-`examples/extensions/permission-gate.ts` is the starting point.
-
-**2. Close the loop from outcomes.** Right now the dataset grows by hand. Every
+**1. Close the loop from outcomes.** Right now the dataset grows by hand. Every
 held decision a human then approves, and every allowed action that later needed
 a revert, is a labelled row that the system already has — it just is not
 collecting them. A `/v1/feedback` endpoint plus a weekly job that appends to the
 dataset and re-runs calibration would make the gate improve from use.
 
-**3. Measure whether the probabilities mean anything.** Bucket decisions by
+**2. Measure whether the probabilities mean anything.** Bucket decisions by
 `P(safe)` and plot the observed rate of "this turned out fine" per bucket. If
 the curve is flat, the probabilities are an ordering and nothing more, and the
 thresholds are doing all the work. Worth knowing either way; a reliability
 diagram in the calibration report would show it.
 
-**4. Use the judge role for the uncertain middle.** A second model on
+**3. Use the judge role for the uncertain middle.** A second model on
 disagreement, or on `0.4 < P < 0.7`. `Choice` distributions make the "close
 call" band explicit, so this is cheap to target — you spend the extra call only
 where the first one was unsure.
 
-**5. Per-context policies.** One `autonomy_threshold` for every environment is
+**4. Per-context policies.** One `autonomy_threshold` for every environment is
 crude. Production should be stricter than a scratch branch. The policy layer is
 already pure and parameterised; it needs a lookup, not a redesign.
 
-**6. Try the TypeSafe backend.** `dspy.experimental.TypeSafe("jev-latest")`
+**5. Try the TypeSafe backend.** `dspy.experimental.TypeSafe("jev-latest")`
 returns probabilities natively instead of asking a generative model to produce
 evidence as JSON. The same signature, demos and field parameters work with both,
 so it is a backend swap — and a comparison worth publishing.
 
-**7. Prompt-injection evaluation.** One labelled row (`ag-022`) is not a test
+**6. Prompt-injection evaluation.** One labelled row (`ag-022`) is not a test
 suite. Build an adversarial set: actions phrased to sound routine, context
 carrying instructions, rewordings of a blocked action. Track the pass rate as a
 metric, the way `safety_recall` is tracked.
 
-**8. Sharpen the rubrics with real disagreements.** The rows where the
+**7. Sharpen the rubrics with real disagreements.** The rows where the
 open-weight and Claude backends disagree are usually rows whose *label* is
 arguable. Those are the most valuable rows in the dataset: resolving them
 improves both the labels and the rubric text.
 
-**9. Cost and latency budgets.** Token usage per decision is in the MLflow
+**8. Cost and latency budgets.** Token usage per decision is in the MLflow
 traces but not in the metrics. Exporting it, with a per-harness budget, makes
 "is the gate worth it?" answerable.
 
-**10. Multi-step planning, not just single steps.** The gate judges one action.
+**9. Multi-step planning, not just single steps.** The gate judges one action.
 Agents propose plans. Scoring a sequence — where step three is only unsafe
 because step two happened — is a different and more interesting problem, and the
 `Choice`-over-runtime-candidates pattern in the DSPy decision-types reference is
@@ -241,9 +258,10 @@ src/dspy_jev/
   metrics.py         Asymmetric gate metric, safety recall, false-allow rate
   calibrate.py       ReAnchor driver, artifact and report
   observability.py   MLflow autolog, audit callback, redaction, metrics
+  enforce.py         Triage, action rendering, fail-closed verdicts for the hooks
   service/           FastAPI: /v1/decide, /v1/triage, /healthz, /readyz, /metrics
   mcp_server.py      MCP tools, in-process or proxying to the service
-  cli.py             doctor, models, decide, triage, calibrate, evaluate, serve, mcp
+  cli.py             doctor, models, decide, guard, triage, calibrate, evaluate, serve, mcp
 
 harnesses/           Ready-to-copy assets per harness (skills, profiles, configs)
 scripts/             install.sh + setup_<harness>.sh + observability.sh
@@ -267,7 +285,7 @@ make test-live      # opt-in, needs real credentials
 | `tests/unit` | Registry, settings, LM construction, policy layer, metrics, dataset validation, redaction, CLI |
 | `tests/contract` | HTTP surface, golden response and OpenAPI shape, MCP tool names and schemas |
 | `tests/calibration` | That ReAnchor measurably improves a mis-anchored gate, deterministically, without touching the prompt |
-| `tests/integration` | Calibrate → save → serve → decide, and the shipped harness assets |
+| `tests/integration` | Calibrate → save → serve → decide, the shipped harness assets, the hooks run as real processes, and Python/TypeScript triage parity |
 | `tests/live` | Real providers, and that every configured cloud model is still served |
 
 The stubs return probability evidence in the wire format, so DSPy's real
