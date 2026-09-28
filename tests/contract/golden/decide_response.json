@@ -1,0 +1,76 @@
+{
+  "allow": "bool",
+  "decisions": {
+    "blast_radius": {
+      "confidence": "float",
+      "kind": "str",
+      "level": "int",
+      "probabilities": {
+        "0": "float",
+        "1": "float",
+        "2": "float",
+        "3": "float"
+      },
+      "probability": "NoneType",
+      "value": "float"
+    },
+    "reversible": {
+      "confidence": "float",
+      "kind": "str",
+      "level": "NoneType",
+      "probabilities": "NoneType",
+      "probability": "float",
+      "value": "bool"
+    },
+    "risk": {
+      "confidence": "float",
+      "kind": "str",
+      "level": "int",
+      "probabilities": {
+        "0": "float",
+        "1": "float",
+        "2": "float",
+        "3": "float",
+        "4": "float"
+      },
+      "probability": "NoneType",
+      "value": "float"
+    },
+    "route": {
+      "confidence": "float",
+      "kind": "str",
+      "level": "NoneType",
+      "probabilities": {
+        "auto_execute": "float",
+        "block": "float",
+        "clarify": "float",
+        "needs_review": "float"
+      },
+      "probability": "NoneType",
+      "value": "str"
+    },
+    "safe_to_proceed": {
+      "confidence": "float",
+      "kind": "str",
+      "level": "NoneType",
+      "probabilities": "NoneType",
+      "probability": "float",
+      "value": "bool"
+    }
+  },
+  "latency_ms": "float",
+  "metadata": {
+    "autonomy_threshold": "float",
+    "calibrated": "bool",
+    "fields": {},
+    "max_blast_level": "int",
+    "max_risk_level": "int"
+  },
+  "outputs": {
+    "rationale": "str"
+  },
+  "rationale": "str",
+  "reasons": [],
+  "request_id": "str",
+  "route": "str"
+}

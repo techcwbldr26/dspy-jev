@@ -1,0 +1,17 @@
+{
+  "/healthz": [
+    "get"
+  ],
+  "/metrics": [
+    "get"
+  ],
+  "/readyz": [
+    "get"
+  ],
+  "/v1/decide": [
+    "post"
+  ],
+  "/v1/triage": [
+    "post"
+  ]
+}

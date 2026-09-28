@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Secrets and local state
+.env
+.env.local
+
+# Deliverables handed over as Word documents, not tracked here
+*.docx
+*.pdf
+
+# Observability and DSPy caches
+.mlflow/
+mlruns/
+.dspy_cache/
+
+# Calibration output (artifacts are environment-specific; commit deliberately)
+artifacts/*.json
+!artifacts/.gitkeep
+
+# OS
+.DS_Store
