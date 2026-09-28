@@ -1,0 +1,21 @@
+{
+  "$comment": [
+    "Optional. Pi prefers CLI tools with READMEs (see skills/dspy-jev/SKILL.md),",
+    "so the skill above is the primary integration. Use this only if you have",
+    "pi-mcp-adapter installed and want the gate as an MCP tool instead.",
+    "Copy to .mcp.json in the project root, or ~/.config/mcp/mcp.json.",
+    "Start the server first:  dspy-jev serve  &&  dspy-jev mcp --transport streamable-http"
+  ],
+  "mcpServers": {
+    "dspy-jev": {
+      "url": "http://127.0.0.1:8081/mcp",
+      "lifecycle": "lazy",
+      "directTools": ["jev_decide", "jev_triage", "jev_status"],
+      "toolPrefix": "none"
+    }
+  },
+  "settings": {
+    "approveTools": false,
+    "idleTimeout": 30
+  }
+}

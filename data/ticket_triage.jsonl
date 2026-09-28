@@ -1,0 +1,12 @@
+{"id":"tt-001","ticket":"Payment failed and my order is stuck at the confirmation screen.","urgent":true,"severity":2,"category":"billing"}
+{"id":"tt-002","ticket":"There is a typo on the help page about shipping.","urgent":false,"severity":0,"category":"technical"}
+{"id":"tt-003","ticket":"Can't reset my password, I am locked out of the account completely.","urgent":true,"severity":2,"category":"account"}
+{"id":"tt-004","ticket":"The invoice date is wrong but the amount charged is correct.","urgent":false,"severity":0,"category":"billing"}
+{"id":"tt-005","ticket":"The app freezes every time I open the settings screen.","urgent":false,"severity":1,"category":"technical"}
+{"id":"tt-006","ticket":"I was charged twice for the same subscription this month.","urgent":false,"severity":1,"category":"billing"}
+{"id":"tt-007","ticket":"Nobody on my team can log in since this morning's update.","urgent":true,"severity":2,"category":"account"}
+{"id":"tt-008","ticket":"The dashboard takes about eight seconds to load, but it does load.","urgent":false,"severity":1,"category":"technical"}
+{"id":"tt-009","ticket":"My profile picture is blurry after upload.","urgent":false,"severity":0,"category":"account"}
+{"id":"tt-010","ticket":"Checkout returns a 500 error for every card we try.","urgent":true,"severity":2,"category":"technical"}
+{"id":"tt-011","ticket":"I would like to change the billing address on my next invoice.","urgent":false,"severity":0,"category":"billing"}
+{"id":"tt-012","ticket":"Export to CSV silently produces an empty file for large date ranges.","urgent":false,"severity":1,"category":"technical"}

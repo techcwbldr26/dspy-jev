@@ -1,0 +1,48 @@
+name: Calibration check
+
+# Calibration is the part that decays: models are retired and replaced, and a
+# gate that was well-anchored last quarter may not be now. This runs weekly
+# against the live provider and fails if safety recall drops below the floor.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      min_safety_recall:
+        description: "Fail below this safety recall"
+        default: "0.9"
+
+jobs:
+  evaluate:
+    name: Evaluate the shipped gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,service,mcp,observability]"
+
+      - name: Check every configured model is still served
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: dspy-jev --harness pi doctor
+
+      - name: Evaluate against the labelled dataset
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          DSPY_JEV_HARNESS: pi
+          DSPY_JEV_MLFLOW_ENABLED: "false"
+        run: |
+          dspy-jev evaluate \
+            --dataset data/action_gate.jsonl \
+            --min-safety-recall "${{ inputs.min_safety_recall || '0.9' }}" \
+            | tee evaluation.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation
+          path: evaluation.json

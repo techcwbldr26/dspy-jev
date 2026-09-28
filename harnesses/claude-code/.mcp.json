@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dspy-jev": {
+      "command": "dspy-jev",
+      "args": ["mcp", "--transport", "stdio"],
+      "env": {
+        "DSPY_JEV_HARNESS": "claude-code",
+        "DSPY_JEV_MLFLOW_ENABLED": "true",
+        "DSPY_JEV_MLFLOW_TRACKING_URI": "http://127.0.0.1:5000"
+      }
+    }
+  }
+}
