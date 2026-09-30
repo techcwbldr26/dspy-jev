@@ -21,6 +21,7 @@ the other layers cannot:
 | Policy chain | For *this* decision, which of the six conditions failed, and by how much? |
 | Recent decisions | What has the gate been doing? |
 | Calibration in force | Which fitted parameters are live, and what did fitting them buy? |
+| Observability | Is anything being recorded, how fast is the gate, and where do I look for detail? |
 
 Dragging the threshold recomputes every verdict in the browser from probabilities
 already fetched — no model call. That is the point: it makes the local, reviewable
@@ -28,6 +29,22 @@ nature of calibration something you can feel rather than read about.
 
 The feed is in memory only and bounded. The action text is the user's data; the
 durable record is the audit log below, which redacts.
+
+The last panel is the one that needs nothing else running. It reads the counters
+the service already keeps and says, in one place, which of the four sinks below
+are live:
+
+![The observability panel](images/observability-panel.png)
+
+Three numbers worth knowing:
+
+- **Decisions served** is the allow/hold split. Drifting towards `allow` over
+  weeks is the signal to recalibrate.
+- **Model calls** exceeds decisions whenever the lens has run, because building
+  the lens puts the whole labelled dataset through the gate. A median of a few
+  milliseconds means DSPy answered from its cache rather than calling out.
+- **Median decision** is measured over decisions, not over every HTTP request,
+  so dashboard polling does not flatter it.
 
 ## 1. `inspect_history` — the first thing to try
 
@@ -49,10 +66,12 @@ structure across multiple calls, and it records no latency or relationships.
 No signup, no API key.
 
 ```bash
-./scripts/observability.sh        # mlflow server, SQLite store, :5000
+./scripts/observability.sh     # mlflow server, SQLite store, :5000
 ```
 
-SQLite is required; the default file store does not support tracing.
+SQLite is required; the default file store does not support tracing. The script
+picks it for you, keeps everything under `./mlruns`, and turns MLflow's telemetry
+off so this works on an air-gapped box. `--stop` shuts it down again.
 
 ```bash
 export DSPY_JEV_MLFLOW_ENABLED=true
@@ -60,10 +79,30 @@ export DSPY_JEV_MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 dspy-jev decide --task "ship it" --action "deploy to prod" --context "friday"
 ```
 
-Open http://127.0.0.1:5000 → experiment `dspy-jev` → **Traces**. One trace per
-decision, containing the module span, the LM call (with token usage and
-latency), the adapter format and parse steps, and a `dspy_jev.decide` span for
-the policy layer.
+Open http://127.0.0.1:5000 → experiment `dspy-jev` → **Traces**. One row per
+decision, with the inputs, the evidence that came back, the duration and the
+token count:
+
+![The trace list](images/mlflow-traces.png)
+
+Open one and you get the call tree. The `dspy_jev.decide` span is the policy
+layer; everything under it is DSPy:
+
+![One decision, as a span tree](images/mlflow-trace.png)
+
+Select `LM.__call__` and you are looking at the thing this project is actually
+about — the prompt that went out, the model that answered, and the raw
+probability that came back:
+
+![The model call, with the probability it returned](images/mlflow-lm-call.png)
+
+That `{"noul": 0.02}` is the whole design in one line. The model reported a
+probability; it did not decide anything. The threshold that turned 0.02 into a
+block lives in your calibration artifact, not in the model's head — which is why
+you can move it, review it, and explain it to an auditor.
+
+A trace also carries token usage (the run above: 2,253 in, 1,167 out), so cost
+per decision is a query rather than an estimate.
 
 `configure_mlflow()` calls `mlflow.dspy.autolog(log_traces=True,
 log_traces_from_eval=True, log_compiles=True)`. `log_compiles` is on so a
@@ -159,8 +198,14 @@ class BlockAlarm(BaseCallback):
         if route == "block":
             pager.notify(f"gate blocked an action: {call_id}")
 
-dspy.configure(callbacks=[DecisionAuditCallback(settings), BlockAlarm()])
+dspy.configure(callbacks=[*dspy.settings.callbacks, BlockAlarm()])
 ```
+
+**Append, never replace.** `dspy.configure(callbacks=[...])` overwrites the list,
+and MLflow's autolog registers its tracing callback the same way. Setting the
+list rather than extending it silently removes tracing — the symptom is a trace
+with the policy span in it and nothing underneath. `install_audit_callback()`
+exists for exactly this reason, and this project's entry points all use it.
 
 Available handlers: `on_module_*`, `on_lm_*`, `on_adapter_format_*`,
 `on_adapter_parse_*`, `on_tool_*`, `on_evaluate_*`, `on_compile_*`.
@@ -171,7 +216,9 @@ changing them in place changes what the program returns.
 ## What to check after a change
 
 1. `curl -s localhost:8080/metrics | grep decisions_total` — counters moving.
-2. MLflow → Traces — a span tree per decision, with the LM call inside it.
+2. MLflow → Traces — a span tree per decision, with the LM call inside it. A
+   trace holding only `dspy_jev.decide` means something replaced the callback
+   list; see section 6.
 3. `DSPY_JEV_LOG_FORMAT=json … 2>&1 | jq -c 'select(.message=="module.end")'` —
    evidence present.
 4. The same command with real user text in `--context`: that text must **not**

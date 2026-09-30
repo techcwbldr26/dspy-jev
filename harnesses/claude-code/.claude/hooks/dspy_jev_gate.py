@@ -123,7 +123,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 - a crashing gate must still deny
+    except Exception as exc:  # a crashing gate must still deny
         json.dump(
             _decide("deny", f"dspy-jev gate: the hook itself failed ({type(exc).__name__}: {exc})."),
             sys.stdout,

@@ -20,6 +20,9 @@
   "/v1/lens": [
     "get"
   ],
+  "/v1/observability": [
+    "get"
+  ],
   "/v1/triage": [
     "post"
   ]

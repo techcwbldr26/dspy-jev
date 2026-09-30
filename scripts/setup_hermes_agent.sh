@@ -58,4 +58,10 @@ Confirm the provider really answers, then calibrate, then look at it:
     dspy-jev doctor --probe
     dspy-jev calibrate --dataset data/action_gate.jsonl
     dspy-jev serve            # console at http://127.0.0.1:8080
+
+To see inside a single decision -- the prompt, the raw probability, the tokens:
+    scripts/observability.sh                       # tracking server on :5000
+    DSPY_JEV_MLFLOW_ENABLED=true dspy-jev serve    # restart the gate onto it
+Then open http://127.0.0.1:5000, pick the 'dspy-jev' experiment, Traces tab.
+The console's own Observability panel says which sinks are live either way.
 NEXT

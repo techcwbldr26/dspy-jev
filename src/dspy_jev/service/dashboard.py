@@ -25,6 +25,7 @@ from typing import Any
 
 from dspy_jev.config import Settings
 from dspy_jev.data import ActionGateExample, DatasetError, load_examples
+from dspy_jev.observability import METRICS, percentile
 
 #: How many recent decisions the dashboard can show. Bounded on purpose.
 DECISION_LOG_SIZE = 200
@@ -104,6 +105,27 @@ def _clip(text: str, limit: int = FEED_TEXT_LIMIT) -> str:
     return collapsed if len(collapsed) <= limit else f"{collapsed[:limit]}…"
 
 
+#: The Noul default when nothing has been fitted.
+DEFAULT_NOUL_THRESHOLD = 0.5
+
+
+def effective_threshold(program: Any) -> float:
+    """The probability an action must actually clear to be allowed.
+
+    Two separate cuts have to be satisfied, and reporting either one alone
+    misstates the gate:
+
+    * the **fitted Noul threshold**, which decides ``safe_to_proceed.value``;
+    * the **policy floor** (``autonomy_threshold``), applied on top by the
+      policy layer.
+
+    An action must clear both, so the effective bar is the higher of the two.
+    """
+    fields = getattr(getattr(program, "gate", None), "fields", {}) or {}
+    fitted = fields.get("safe_to_proceed", {}).get("threshold", DEFAULT_NOUL_THRESHOLD)
+    return max(float(fitted), float(getattr(program, "autonomy_threshold", 0.0)))
+
+
 def calibration_summary(settings: Settings, *, fields: dict[str, Any]) -> dict[str, Any]:
     """The fitted parameters in force, plus the report that produced them."""
     artifact = settings.calibrated_artifact
@@ -170,4 +192,78 @@ def threshold_tradeoff(rows: list[dict[str, Any]], threshold: float) -> dict[str
         "total": len(rows),
         "unsafe": sum(1 for r in rows if not r["label_safe"]),
         "safe": sum(1 for r in rows if r["label_safe"]),
+    }
+
+
+def _latency_of(values: list[float]) -> dict[str, Any] | None:
+    """p50 / p95 over a list of millisecond timings, or ``None`` when empty."""
+    if not values:
+        return None
+    return {
+        "count": len(values),
+        "p50_ms": percentile(values, 50),
+        "p95_ms": percentile(values, 95),
+        "max_ms": round(max(values), 3),
+    }
+
+
+def observability_summary(settings: Settings, log: DecisionLog | None = None) -> dict[str, Any]:
+    """What the observability stack is doing right now, in plain numbers.
+
+    Three surfaces ship, and each suits a different reader. This is the one that
+    needs no extra process: counters and latency the service already keeps, put
+    into the shape a person would ask for them in. MLflow gives the per-decision
+    call tree; the JSON audit log is the durable record a compliance reviewer
+    reads. All three come from the same callbacks.
+    """
+    snapshot = METRICS.snapshot()
+    counters = snapshot["counters"]
+
+    def _by_label(prefix: str, label: str) -> dict[str, int]:
+        found: dict[str, int] = {}
+        for name, count in counters.items():
+            if not name.startswith(prefix + "{"):
+                continue
+            for pair in name[len(prefix) + 1 : -1].split(","):
+                key, _, value = pair.partition("=")
+                if key == label:
+                    found[value] = found.get(value, 0) + count
+        return found
+
+    verdicts = _by_label("dspy_jev_decisions_total", "outcome")
+    routes = _by_label("dspy_jev_decisions_total", "route")
+    lm_calls = _by_label("dspy_jev_lm_calls_total", "outcome")
+    decided = sum(verdicts.values())
+
+    tracing_on = bool(settings.mlflow_enabled)
+    return {
+        "decisions": {
+            "total": decided,
+            "allowed": verdicts.get("allow", 0),
+            "held": verdicts.get("hold", 0),
+            "by_route": routes,
+        },
+        "model_calls": {
+            "ok": lm_calls.get("ok", 0),
+            "error": lm_calls.get("error", 0),
+        },
+        # The HTTP summary covers every path, dashboard polling included, so a
+        # "how long does a decision take" number is taken from the decisions.
+        "decision_latency": _latency_of([e["latency_ms"] for e in (log.recent(limit=10_000) if log else [])]),
+        "latency": snapshot["latency"],
+        "sinks": {
+            "audit_log": {
+                "on": True,
+                "detail": f"one {settings.log_format.upper()} record per call, on stderr at {settings.log_level}",
+            },
+            "metrics": {"on": True, "detail": "Prometheus text at /metrics"},
+            "tracing": {
+                "on": tracing_on,
+                "detail": settings.mlflow_tracking_uri if tracing_on else "off — set DSPY_JEV_MLFLOW_ENABLED=true",
+            },
+            "otel": {
+                "on": bool(settings.otel_enabled),
+                "detail": settings.otel_endpoint if settings.otel_enabled else "off",
+            },
+        },
     }

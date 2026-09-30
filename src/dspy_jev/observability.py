@@ -31,6 +31,7 @@ from collections import Counter as _Counter
 from contextlib import contextmanager, suppress
 from typing import Any
 
+import dspy
 from dspy.utils.callback import BaseCallback
 
 from dspy_jev.config import Settings, get_settings
@@ -46,6 +47,12 @@ REDACTED = "***"
 
 
 # --- structured logging ---------------------------------------------------------
+
+
+# How long to wait on a tracking server before giving up on tracing for this
+# process. Deliberately short: the gate answers in ~10s and must not wait on it.
+MLFLOW_REQUEST_TIMEOUT_S = 5
+MLFLOW_REQUEST_RETRIES = 1
 
 
 class JsonFormatter(logging.Formatter):
@@ -141,8 +148,8 @@ class Metrics:
             latency = {
                 name: {
                     "count": len(values),
-                    "p50_ms": _percentile(values, 50),
-                    "p95_ms": _percentile(values, 95),
+                    "p50_ms": percentile(values, 50),
+                    "p95_ms": percentile(values, 95),
                     "max_ms": max(values) if values else 0.0,
                 }
                 for name, values in self._latency_ms.items()
@@ -164,8 +171,8 @@ class Metrics:
                 if not values:
                     continue
                 lines.append(f"# TYPE {name}_ms summary")
-                lines.append(f'{name}_ms{{quantile="0.5"}} {_percentile(values, 50):.3f}')
-                lines.append(f'{name}_ms{{quantile="0.95"}} {_percentile(values, 95):.3f}')
+                lines.append(f'{name}_ms{{quantile="0.5"}} {percentile(values, 50):.3f}')
+                lines.append(f'{name}_ms{{quantile="0.95"}} {percentile(values, 95):.3f}')
                 lines.append(f"{name}_ms_count {len(values)}")
                 lines.append(f"{name}_ms_sum {sum(values):.3f}")
         return "\n".join(lines) + "\n"
@@ -176,7 +183,8 @@ class Metrics:
             self._latency_ms.clear()
 
 
-def _percentile(values: list[float], pct: float) -> float:
+def percentile(values: list[float], pct: float) -> float:
+    """The pct-th value of a sorted copy. Shared with the dashboard summary."""
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -292,6 +300,20 @@ def _evidence_summary(outputs: Any) -> dict[str, Any]:
 # --- MLflow ---------------------------------------------------------------------
 
 
+def install_audit_callback(settings: Settings | None = None) -> None:
+    """Add the audit callback to DSPy without displacing anyone else's.
+
+    ``dspy.configure(callbacks=[...])`` *replaces* the list. MLflow's autolog
+    registers its tracing callback the same way, so configuring ours after it
+    silently removed it -- traces arrived with the policy span and nothing
+    under it. Append instead, and only once per process.
+    """
+    existing = list(getattr(dspy.settings, "callbacks", None) or [])
+    if any(isinstance(cb, DecisionAuditCallback) for cb in existing):
+        return
+    dspy.configure(callbacks=[*existing, DecisionAuditCallback(settings)])
+
+
 def configure_mlflow(settings: Settings | None = None) -> bool:
     """Turn on MLflow autologging for DSPy. Returns ``True`` when it is active.
 
@@ -302,6 +324,15 @@ def configure_mlflow(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
     if not settings.mlflow_enabled:
         return False
+    # MLflow phones home for telemetry on import. On an air-gapped host, or
+    # behind an egress proxy that refuses the CONNECT, that attempt stalls the
+    # first call. Opt out before importing, unless the operator said otherwise.
+    os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
+    # A tracking server that is down must not hold up the gate. MLflow's default
+    # is seven retries with backoff, which is over a minute of blocked startup
+    # for a service whose whole job is to answer quickly.
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", str(MLFLOW_REQUEST_TIMEOUT_S))
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", str(MLFLOW_REQUEST_RETRIES))
     try:
         import mlflow
     except ImportError:
@@ -310,10 +341,20 @@ def configure_mlflow(settings: Settings | None = None) -> bool:
 
     if not os.environ.get("MLFLOW_TRACKING_URI"):
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-    if not os.environ.get("MLFLOW_EXPERIMENT_ID"):
-        mlflow.set_experiment(settings.mlflow_experiment)
-
-    mlflow.dspy.autolog(log_traces=True, log_traces_from_eval=True, log_compiles=True, silent=True)
+    try:
+        if not os.environ.get("MLFLOW_EXPERIMENT_ID"):
+            mlflow.set_experiment(settings.mlflow_experiment)
+        mlflow.dspy.autolog(log_traces=True, log_traces_from_eval=True, log_compiles=True, silent=True)
+    except Exception as exc:  # tracing is never worth a failed start
+        logger.warning(
+            "mlflow.unreachable",
+            extra={
+                "tracking_uri": mlflow.get_tracking_uri(),
+                "error": str(exc)[:200],
+                "hint": "start one with scripts/observability.sh, or set DSPY_JEV_MLFLOW_ENABLED=false",
+            },
+        )
+        return False
     logger.info(
         "mlflow.enabled",
         extra={"tracking_uri": mlflow.get_tracking_uri(), "experiment": settings.mlflow_experiment},
@@ -359,8 +400,11 @@ def policy_span(name: str, attributes: dict[str, Any] | None = None):
     span_cm = None
     with suppress(Exception):
         import mlflow
+        from mlflow.entities import SpanType
 
-        span_cm = mlflow.start_span(name=name)
+        # Typed as AGENT so the trace tree reads top-down in the UI: the policy
+        # step, then the DSPy chain, then the LM call inside it.
+        span_cm = mlflow.start_span(name=name, span_type=SpanType.AGENT)
     if span_cm is None:
         yield None
         return

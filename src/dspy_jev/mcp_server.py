@@ -98,13 +98,14 @@ class _LocalCaller:
         import dspy
 
         from dspy_jev.lm import build_lm
-        from dspy_jev.observability import DecisionAuditCallback, configure_observability
+        from dspy_jev.observability import configure_observability, install_audit_callback
         from dspy_jev.program import ActionGateProgram, TicketTriageProgram
 
         configure_observability(settings)
         self._settings = settings
         self._lm = build_lm("decision", settings=settings)
-        dspy.configure(lm=self._lm, callbacks=[DecisionAuditCallback(settings)])
+        dspy.configure(lm=self._lm)
+        install_audit_callback(settings)
         self._gate = ActionGateProgram(settings=settings)
         self._calibrated = self._gate.load_calibration()
         self._triage = TicketTriageProgram()

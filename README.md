@@ -132,8 +132,16 @@ safe on one row and unsafe on the other. A draggable line is the threshold.
 
 Drag it and the verdicts change — but nothing is re-run. The probabilities are
 already in; only the local cut moves. Two counts trade against each other as you
-drag. At `0.85`, nothing unsafe slips through but 14 safe actions are blocked. At
-`0.55`, nothing is blocked needlessly and **seven unsafe actions get through**:
+drag. The screenshots below are from a real run against `glm-5.3` on Ollama
+Cloud, over the 40 labelled actions in `data/action_gate.jsonl`.
+
+At the calibrated threshold of `0.90`, the two error counts are both zero —
+nothing unsafe gets through, and nothing safe is stopped:
+
+![The lens at the calibrated threshold of 0.90](docs/images/lens-threshold-090.png)
+
+Drag it down to `0.55` and **five unsafe actions slip through**, at no saving in
+friction, because there was no friction to save:
 
 ![The lens with the threshold dragged to 0.55](docs/images/lens-threshold-055.png)
 
@@ -145,7 +153,13 @@ conditions failed, and by how much. This layer is plain Python over the numbers,
 so when someone asks why an action was blocked, the row names the number to
 change:
 
-![The policy chain for a blocked action](docs/images/policy-chain.png)
+![The policy chain for a held action](docs/images/policy-chain.png)
+
+That example is worth reading twice. The model argued *for* the action — "on-call
+has approved this restart … no further human gate is needed" — and the gate held
+it anyway, because `0.85` clears the policy floor but not the fitted threshold of
+`0.90`, and the risk level exceeds the ceiling. The model's prose is an opinion.
+The policy is the control.
 
 It follows your system theme:
 
@@ -196,13 +210,34 @@ DSPY_JEV_HARNESS=pi          dspy-jev evaluate --dataset data/action_gate.jsonl
 DSPY_JEV_HARNESS=claude-code dspy-jev evaluate --dataset data/action_gate.jsonl
 ```
 
-### Observability that was designed in
+### Observability you can actually look at
 
-MLflow tracing needs no signup and no API key: one `autolog()` call and every
-module, LM call and adapter step appears as a span. Alongside it, a structured
-JSON audit line per decision carrying the evidence, and a `/metrics` endpoint
-with no extra dependency. Prompt bodies are withheld by default — decisions
-carry user data — and credential-shaped keys are redacted at any depth.
+Four sinks, one set of callbacks, and the console tells you which are live:
+
+![The observability panel](docs/images/observability-panel.png)
+
+MLflow tracing needs no signup and no API key — `./scripts/observability.sh`
+starts a local server with a SQLite store, and every decision becomes a trace:
+
+![One decision, as a span tree](docs/images/mlflow-trace.png)
+
+Open the model call and you are looking at the thing this project is about: the
+prompt that went out, and the raw probability that came back.
+
+![The model call, with the probability it returned](docs/images/mlflow-lm-call.png)
+
+`{"noul": 0.02}` is the entire design in one line. The model reported a
+probability; it decided nothing. The threshold that turned `0.02` into a block
+lives in a calibration artifact you can read, move and defend. Token usage rides
+along on the trace, so cost per decision is a query rather than an estimate.
+
+Alongside tracing: a structured JSON audit line per decision carrying the
+evidence, and a `/metrics` endpoint with no extra dependency. Prompt bodies are
+withheld by default — decisions carry user data — and credential-shaped keys are
+redacted at any depth. Tracing never blocks the gate: an unreachable tracking
+server logs a warning and is skipped, rather than holding up startup.
+
+Full walkthrough: [`docs/observability.md`](docs/observability.md).
 
 ---
 
