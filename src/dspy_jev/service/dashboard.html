@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision Gate</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='5' cy='8' r='3' fill='%232a78d6'/%3E%3Crect x='10' y='1' width='2' height='14' fill='%23d03b3b'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --plane:#f9f9f7; --surface:#fcfcfb;
+    --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+    --series:#2a78d6; --critical:#d03b3b; --good:#0ca30c;
+    --zone-danger:rgba(208,59,59,.09); --zone-friction:rgba(137,135,129,.11);
+    --shadow:0 1px 2px rgba(11,11,11,.05), 0 8px 24px -16px rgba(11,11,11,.22);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane:#0d0d0d; --surface:#1a1a19;
+      --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+      --series:#3987e5; --critical:#d03b3b; --good:#0ca30c;
+      --zone-danger:rgba(208,59,59,.16); --zone-friction:rgba(195,194,183,.10);
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:#0d0d0d; --surface:#1a1a19;
+    --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+    --series:#3987e5; --critical:#d03b3b; --good:#0ca30c;
+    --zone-danger:rgba(208,59,59,.16); --zone-friction:rgba(195,194,183,.10);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--plane); color:var(--ink);
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1180px; margin:0 auto; padding:28px 16px 72px; }
+
+  header { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
+  h1 { font-size:21px; font-weight:650; margin:0; letter-spacing:-.01em; }
+  .sub { color:var(--ink-2); font-size:14px; margin:0 0 26px; max-width:62ch; }
+  .spacer { flex:1 1 auto; }
+
+  button, .btn {
+    font:inherit; font-size:13px; color:var(--ink); background:var(--surface);
+    border:1px solid var(--ring); border-radius:8px; padding:6px 11px; cursor:pointer;
+  }
+  button:hover { border-color:var(--axis); }
+  button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--series); outline-offset:2px; }
+
+  .card {
+    background:var(--surface); border:1px solid var(--ring); border-radius:14px;
+    padding:20px 22px; box-shadow:var(--shadow); margin-bottom:20px;
+  }
+  .card > h2 {
+    font-size:13px; font-weight:650; letter-spacing:.055em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 4px;
+  }
+  .card > .note { color:var(--ink-2); font-size:13.5px; margin:0 0 18px; max-width:76ch; }
+
+  /* stat tiles */
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:1px;
+           background:var(--ring); border:1px solid var(--ring); border-radius:14px; overflow:hidden; margin-bottom:20px; }
+  .tile { background:var(--surface); padding:16px 18px; }
+  .tile .k { font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); }
+  .tile .v { font-size:30px; font-weight:600; letter-spacing:-.02em; margin-top:5px; line-height:1.1; }
+  .tile .d { font-size:12.5px; color:var(--ink-2); margin-top:3px; }
+  .tile .v.bad { color:var(--critical); }
+  .tile .v.ok  { color:var(--good); }
+
+  /* lens */
+  .lens-head { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-bottom:8px; }
+  .thr { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink-2); }
+  .thr input[type=range] { width:220px; accent-color:var(--series); }
+  .thr .val { font-variant-numeric:tabular-nums; font-weight:600; color:var(--ink); min-width:3.4em; }
+  svg { display:block; width:100%; height:auto; overflow:visible; }
+  .lane-label { font-size:11.5px; fill:var(--muted); letter-spacing:.05em; text-transform:uppercase; }
+  .tick { font-size:11px; fill:var(--muted); font-variant-numeric:tabular-nums; }
+  .zone-label { font-size:12px; font-weight:600; }
+  .zone-sub { font-size:11px; fill:var(--ink-2); }
+  .dot { fill:var(--series); stroke:var(--surface); stroke-width:2; cursor:pointer; }
+  .dot.err { fill:var(--critical); }
+  .dot:hover { stroke:var(--ink); }
+  .axis-line { stroke:var(--axis); stroke-width:1; }
+  .grid-line { stroke:var(--grid); stroke-width:1; }
+  .thr-line { stroke:var(--series); stroke-width:2; }
+  .thr-grip { fill:var(--series); cursor:ew-resize; }
+
+  .legend { display:flex; gap:18px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-2); margin-top:14px; }
+  .legend span { display:inline-flex; align-items:center; gap:7px; }
+  .sw { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
+  /* policy chain */
+  .chain { display:flex; flex-direction:column; gap:1px; background:var(--ring);
+           border:1px solid var(--ring); border-radius:10px; overflow:hidden; }
+  .link { display:flex; align-items:center; gap:11px; background:var(--surface); padding:9px 13px; font-size:13.5px; }
+  .link .mark { width:17px; text-align:center; font-weight:700; flex:0 0 auto; }
+  .link.pass .mark { color:var(--good); }
+  .link.fail .mark { color:var(--critical); }
+  .link.fail { background:var(--zone-danger); }
+  .link .why { color:var(--ink-2); margin-left:auto; font-size:12.5px; text-align:right; }
+
+  /* verdict */
+  .verdict { display:flex; align-items:center; gap:11px; font-size:15px; font-weight:600; margin-bottom:12px; }
+  .pill { font-size:11.5px; font-weight:650; letter-spacing:.05em; text-transform:uppercase;
+          padding:3px 9px; border-radius:999px; border:1px solid currentColor; }
+  .pill.allow { color:var(--good); }
+  .pill.hold  { color:var(--critical); }
+
+  /* forms + tables */
+  label.f { display:block; font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+            color:var(--muted); margin:0 0 5px; }
+  input[type=text], textarea {
+    width:100%; font:inherit; font-size:14px; color:var(--ink); background:var(--plane);
+    border:1px solid var(--ring); border-radius:8px; padding:8px 11px; resize:vertical;
+  }
+  input:focus, textarea:focus { outline:2px solid var(--series); outline-offset:-1px; border-color:transparent; }
+  .row { display:grid; gap:13px; margin-bottom:13px; }
+  @media (min-width:720px) { .row.two { grid-template-columns:1fr 1fr; } }
+
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { text-align:left; font-size:11.5px; letter-spacing:.05em; text-transform:uppercase;
+       color:var(--muted); font-weight:600; padding:0 12px 8px 0; border-bottom:1px solid var(--grid); }
+  td { padding:9px 12px 9px 0; border-bottom:1px solid var(--grid); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+
+  .banner { border-radius:12px; padding:15px 18px; margin-bottom:20px; font-size:14px;
+            border:1px solid var(--ring); background:var(--surface); }
+  .banner.warn { border-left:3px solid var(--critical); }
+  .banner h3 { margin:0 0 6px; font-size:14.5px; font-weight:650; }
+  .banner p { margin:0 0 6px; color:var(--ink-2); }
+  .banner code { background:var(--plane); padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .hide { display:none !important; }
+  .muted { color:var(--muted); }
+  #tip { position:fixed; pointer-events:none; z-index:50; max-width:320px; background:var(--surface);
+         color:var(--ink); border:1px solid var(--axis); border-radius:9px; padding:9px 11px;
+         font-size:12.5px; box-shadow:var(--shadow); opacity:0; transition:opacity .09s; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Decision Gate</h1>
+    <span id="status" class="muted" style="font-size:13px">connecting…</span>
+    <span class="spacer"></span>
+    <button id="theme" type="button">Theme</button>
+  </header>
+  <p class="sub">
+    The model reports a probability. A threshold you own turns it into a decision.
+    Everything below is that one idea, made visible.
+  </p>
+
+  <div id="setup" class="banner warn hide">
+    <h3>No model is connected yet</h3>
+    <p id="setup-why"></p>
+    <p>Set <code>OLLAMA_API_KEY</code> in the environment that starts the service, then restart it.
+       Verify with <code>dspy-jev doctor</code>.</p>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <!-- ─────────────── the lens ─────────────── -->
+  <section class="card">
+    <h2>Threshold lens</h2>
+    <p class="note">
+      Every labelled action in the dataset, placed by the probability the model gave it.
+      Actions a person labelled <strong>safe</strong> sit on the top row, <strong>unsafe</strong> on the bottom.
+      Drag the line. Nothing is re-run — the probabilities are already in; only the cut moves.
+      That is what calibration changes.
+    </p>
+
+    <div class="lens-head">
+      <div class="thr">
+        <label for="thr" style="font-size:13px">Threshold</label>
+        <input id="thr" type="range" min="0" max="1" step="0.01" value="0.85"
+               aria-describedby="thr-val">
+        <span class="val" id="thr-val">0.85</span>
+      </div>
+      <button id="thr-reset" type="button">Reset to policy</button>
+      <button id="toggle-table" type="button">Table view</button>
+    </div>
+
+    <div id="lens-empty" class="muted" style="padding:26px 0; font-size:14px"></div>
+    <svg id="lens" viewBox="0 0 900 290" role="img"
+         aria-label="Labelled actions plotted by the probability the model assigned, split by a movable threshold."></svg>
+
+    <div class="legend">
+      <span><i class="sw" style="background:var(--series)"></i> agrees with the label</span>
+      <span><i class="sw" style="background:var(--critical)"></i> disagrees at this threshold</span>
+      <span class="muted">Shaded zones mark the two kinds of error. Row position, not colour, carries the label.</span>
+    </div>
+
+    <div id="lens-table" class="hide" style="margin-top:20px; max-height:340px; overflow:auto"></div>
+  </section>
+
+  <!-- ─────────────── try it ─────────────── -->
+  <section class="card">
+    <h2>Try an action</h2>
+    <p class="note">Ask the gate about a step you might really take. This calls the model.</p>
+    <div class="row two">
+      <div>
+        <label class="f" for="f-task">Task</label>
+        <input id="f-task" type="text" value="Free up disk space on the build box">
+      </div>
+      <div>
+        <label class="f" for="f-ctx">Context</label>
+        <input id="f-ctx" type="text" value="Shared CI runner, three teams building right now">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label class="f" for="f-act">Proposed action</label>
+        <textarea id="f-act" rows="2">Delete the contents of /var/lib/docker</textarea>
+      </div>
+    </div>
+    <button id="ask" type="button" style="font-weight:600">Ask the gate</button>
+    <div id="result" class="hide" style="margin-top:22px"></div>
+  </section>
+
+  <!-- ─────────────── calibration + feed ─────────────── -->
+  <section class="card">
+    <h2>Calibration in force</h2>
+    <p class="note">What the fitted parameters are, and what fitting them bought. Empty means type defaults — conservative, and safe to run on.</p>
+    <div id="calib"></div>
+  </section>
+
+  <section class="card">
+    <h2>Recent decisions</h2>
+    <p class="note">Held in memory only. The audit log is the durable record, and it redacts inputs.</p>
+    <div id="feed"></div>
+  </section>
+
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n, d = 2) => (n === null || n === undefined || Number.isNaN(n)) ? "—" : Number(n).toFixed(d);
+  const pct = (n) => (n === null || n === undefined) ? "—" : Math.round(n * 100) + "%";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+  const state = { rows: [], threshold: 0.85, policyThreshold: 0.85, live: false };
+
+  // ── theme ──────────────────────────────────────────────────────────────
+  $("theme").onclick = () => {
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+    document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+    draw();
+  };
+
+  // ── tooltip ────────────────────────────────────────────────────────────
+  const tip = $("tip");
+  function showTip(evt, html) {
+    tip.innerHTML = html;
+    tip.style.opacity = "1";
+    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = evt.clientX + pad, y = evt.clientY - h - pad;
+    if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+    if (y < 8) y = evt.clientY + pad;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+  const hideTip = () => { tip.style.opacity = "0"; };
+
+  // ── the lens ───────────────────────────────────────────────────────────
+  const W = 900, H = 290, M = { t: 34, r: 30, b: 44, l: 118 };
+  const LANE = { safe: 92, unsafe: 190 };          // y centres of the two rows
+  const x = (p) => M.l + p * (W - M.l - M.r);
+
+  function beeswarm(rows) {
+    // Nudge overlapping dots vertically within their lane so every point stays visible.
+    const R = 7, byLane = { true: [], false: [] };
+    rows.forEach((r) => byLane[r.label_safe].push(r));
+    const placed = [];
+    for (const key of ["true", "false"]) {
+      const base = key === "true" ? LANE.safe : LANE.unsafe;
+      const lane = byLane[key].slice().sort((a, b) => (a.probability ?? 0) - (b.probability ?? 0));
+      const cols = [];
+      lane.forEach((r) => {
+        const px = x(r.probability ?? 0);
+        let slot = 0;
+        while (cols.some((c) => Math.abs(c.px - px) < R * 1.7 && c.slot === slot)) slot++;
+        cols.push({ px, slot });
+        const dir = slot % 2 === 0 ? 1 : -1;
+        placed.push({ ...r, cx: px, cy: base + dir * Math.ceil(slot / 2) * (R * 1.55) });
+      });
+    }
+    return placed;
+  }
+
+  function tradeoff(rows, t) {
+    let falseAllows = 0, falseHolds = 0, unsafe = 0, safe = 0;
+    rows.forEach((r) => {
+      const p = r.probability ?? 0;
+      if (r.label_safe) { safe++; if (p < t) falseHolds++; }
+      else { unsafe++; if (p >= t) falseAllows++; }
+    });
+    return { falseAllows, falseHolds, unsafe, safe, caught: unsafe - falseAllows };
+  }
+
+  function draw() {
+    const svg = $("lens"), rows = state.rows;
+    if (!rows.length) { svg.innerHTML = ""; return; }
+    const t = state.threshold, tx = x(t), pts = beeswarm(rows), tr = tradeoff(rows, t);
+    const top = M.t, bot = H - M.b;
+    const p = [];
+
+    // error zones — area meaning on area marks, kept low-contrast
+    p.push(`<rect x="${M.l}" y="${top}" width="${tx - M.l}" height="${LANE.safe + 30 - top}"
+             fill="var(--zone-friction)"/>`);
+    p.push(`<rect x="${tx}" y="${LANE.unsafe - 32}" width="${W - M.r - tx}" height="${bot - (LANE.unsafe - 32)}"
+             fill="var(--zone-danger)"/>`);
+
+    // axis
+    p.push(`<line class="axis-line" x1="${M.l}" y1="${bot}" x2="${W - M.r}" y2="${bot}"/>`);
+    for (let i = 0; i <= 10; i += 2) {
+      const gx = x(i / 10);
+      p.push(`<line class="grid-line" x1="${gx}" y1="${top}" x2="${gx}" y2="${bot}" opacity=".55"/>`);
+      p.push(`<text class="tick" x="${gx}" y="${bot + 17}" text-anchor="middle">${(i / 10).toFixed(1)}</text>`);
+    }
+    p.push(`<text class="tick" x="${(M.l + W - M.r) / 2}" y="${bot + 36}" text-anchor="middle"
+             style="font-size:12px">P(safe to proceed) — what the model reported</text>`);
+
+    // lanes
+    p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.safe - 3}" text-anchor="end">Labelled safe</text>`);
+    p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.safe + 13}" text-anchor="end" opacity=".7">${tr.safe} actions</text>`);
+    p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.unsafe - 3}" text-anchor="end">Labelled unsafe</text>`);
+    p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.unsafe + 13}" text-anchor="end" opacity=".7">${tr.unsafe} actions</text>`);
+
+    // zone labels — direct-labelled counts, so colour never carries the count
+    p.push(`<text class="zone-label" x="${M.l + 8}" y="${top + 15}" fill="var(--ink-2)">${tr.falseHolds} blocked needlessly</text>`);
+    p.push(`<text class="zone-sub" x="${M.l + 8}" y="${top + 30}">safe work you'd stop — friction</text>`);
+    p.push(`<text class="zone-label" x="${W - M.r - 8}" y="${bot - 27}" text-anchor="end"
+             fill="var(--critical)">${tr.falseAllows} would slip through</text>`);
+    p.push(`<text class="zone-sub" x="${W - M.r - 8}" y="${bot - 12}" text-anchor="end">unsafe work you'd allow — the dangerous error</text>`);
+
+    // threshold
+    p.push(`<line class="thr-line" x1="${tx}" y1="${top - 8}" x2="${tx}" y2="${bot + 4}"/>`);
+    p.push(`<path class="thr-grip" d="M ${tx - 6} ${top - 8} L ${tx + 6} ${top - 8} L ${tx} ${top + 2} Z"/>`);
+    p.push(`<text class="tick" x="${tx}" y="${top - 14}" text-anchor="middle"
+             style="fill:var(--series); font-weight:650">${t.toFixed(2)}</text>`);
+
+    // dots
+    pts.forEach((r, i) => {
+      const prob = r.probability ?? 0;
+      const wrong = r.label_safe ? prob < t : prob >= t;
+      p.push(`<circle class="dot${wrong ? " err" : ""}" cx="${r.cx}" cy="${r.cy}" r="7"
+               data-i="${i}" tabindex="0" role="button"
+               aria-label="${esc(r.action)}. Labelled ${r.label_safe ? "safe" : "unsafe"}. Probability ${fmt(prob)}."/>`);
+    });
+
+    svg.innerHTML = p.join("");
+    svg.querySelectorAll(".dot").forEach((el) => {
+      const r = pts[+el.dataset.i];
+      const wrong = r.label_safe ? (r.probability ?? 0) < t : (r.probability ?? 0) >= t;
+      const html = `<strong>${esc(r.action)}</strong><br>
+        <span class="muted">${esc(r.task)}</span><br><br>
+        Labelled <strong>${r.label_safe ? "safe" : "unsafe"}</strong> · route <strong>${esc(r.label_route)}</strong><br>
+        P(safe) = <strong>${fmt(r.probability)}</strong> · risk level ${r.risk_level ?? "—"}
+        ${wrong ? `<br><span style="color:var(--critical)">At ${t.toFixed(2)} this one is wrong.</span>` : ""}`;
+      el.onmouseenter = (e) => showTip(e, html);
+      el.onmousemove = (e) => showTip(e, html);
+      el.onmouseleave = hideTip;
+      el.onfocus = () => { const b = el.getBoundingClientRect(); showTip({ clientX: b.x + b.width / 2, clientY: b.y }, html); };
+      el.onblur = hideTip;
+    });
+
+    renderTiles(tr);
+    renderLensTable(t);
+  }
+
+  function renderTiles(tr) {
+    const recall = tr.unsafe ? tr.caught / tr.unsafe : 1;
+    $("tiles").innerHTML = `
+      <div class="tile"><div class="k">Unsafe actions caught</div>
+        <div class="v ${recall >= 0.9 ? "ok" : "bad"}">${pct(recall)}</div>
+        <div class="d">${tr.caught} of ${tr.unsafe} — the number to watch</div></div>
+      <div class="tile"><div class="k">Would slip through</div>
+        <div class="v ${tr.falseAllows ? "bad" : "ok"}">${tr.falseAllows}</div>
+        <div class="d">unsafe, but allowed at this cut</div></div>
+      <div class="tile"><div class="k">Blocked needlessly</div>
+        <div class="v">${tr.falseHolds}</div>
+        <div class="d">safe work stopped — the cost of caution</div></div>
+      <div class="tile"><div class="k">Threshold</div>
+        <div class="v">${state.threshold.toFixed(2)}</div>
+        <div class="d">${Math.abs(state.threshold - state.policyThreshold) < 0.005
+          ? "the policy setting" : `policy is ${state.policyThreshold.toFixed(2)}`}</div></div>`;
+  }
+
+  function renderLensTable(t) {
+    const rows = state.rows.slice().sort((a, b) => (b.probability ?? 0) - (a.probability ?? 0));
+    $("lens-table").innerHTML = `<table><thead><tr>
+        <th>Action</th><th>Label</th><th class="num">P(safe)</th><th>At ${t.toFixed(2)}</th>
+      </tr></thead><tbody>${rows.map((r) => {
+        const p = r.probability ?? 0, allowed = p >= t, wrong = r.label_safe ? !allowed : allowed;
+        return `<tr><td>${esc(r.action)}</td>
+          <td>${r.label_safe ? "safe" : "unsafe"}</td>
+          <td class="num">${fmt(p)}</td>
+          <td${wrong ? ' style="color:var(--critical);font-weight:600"' : ""}>
+            ${allowed ? "allowed" : "held"}${wrong ? " — wrong" : ""}</td></tr>`;
+      }).join("")}</tbody></table>`;
+  }
+
+  // ── controls ───────────────────────────────────────────────────────────
+  $("thr").oninput = (e) => { state.threshold = +e.target.value; $("thr-val").textContent = state.threshold.toFixed(2); draw(); };
+  $("thr-reset").onclick = () => { state.threshold = state.policyThreshold; $("thr").value = state.threshold; $("thr-val").textContent = state.threshold.toFixed(2); draw(); };
+  $("toggle-table").onclick = () => {
+    const tbl = $("lens-table"), hidden = tbl.classList.toggle("hide");
+    $("toggle-table").textContent = hidden ? "Table view" : "Hide table";
+  };
+
+  // ── policy chain + verdict ─────────────────────────────────────────────
+  const CHAIN = [
+    ["route",           "Route is auto_execute"],
+    ["safe",            "Model judged it safe"],
+    ["prob",            "Confidence clears the policy floor"],
+    ["risk",            "Risk within the ceiling"],
+    ["blast",           "Blast radius within the ceiling"],
+    ["rev",             "Undoable without another person"],
+  ];
+  function chainOf(res) {
+    const d = res.decisions || {}, meta = res.metadata || {};
+    const prob = d.safe_to_proceed?.probability, risk = d.risk?.level, blast = d.blast_radius?.level;
+    return {
+      route: [res.route === "auto_execute", `is ${res.route}`],
+      safe:  [d.safe_to_proceed?.value === true, d.safe_to_proceed?.value ? "" : "judged unsafe"],
+      prob:  [prob != null && prob >= (meta.autonomy_threshold ?? 0), `${fmt(prob)} vs ${fmt(meta.autonomy_threshold)}`],
+      risk:  [risk != null && risk <= (meta.max_risk_level ?? 0), `${risk} vs max ${meta.max_risk_level}`],
+      blast: [blast != null && blast <= (meta.max_blast_level ?? 0), `${blast} vs max ${meta.max_blast_level}`],
+      rev:   [d.reversible?.value === true, d.reversible?.value ? "" : "needs a restore or a revert"],
+    };
+  }
+  function renderResult(res) {
+    const c = chainOf(res);
+    $("result").classList.remove("hide");
+    $("result").innerHTML = `
+      <div class="verdict">
+        <span class="pill ${res.allow ? "allow" : "hold"}">${res.allow ? "Allowed" : "Held"}</span>
+        <span>route: <strong>${esc(res.route)}</strong></span>
+        <span class="muted" style="font-weight:400">P(safe) = ${fmt(res.decisions?.safe_to_proceed?.probability)}
+          · ${Math.round(res.latency_ms)} ms</span>
+      </div>
+      ${res.rationale ? `<p class="note" style="margin:0 0 14px">${esc(res.rationale)}</p>` : ""}
+      <div class="chain">${CHAIN.map(([k, label]) => {
+        const [ok, why] = c[k] || [false, ""];
+        return `<div class="link ${ok ? "pass" : "fail"}">
+          <span class="mark" aria-hidden="true">${ok ? "✓" : "✕"}</span>
+          <span class="visually-hidden" style="position:absolute;left:-9999px">${ok ? "passed" : "failed"}</span>
+          <span>${label}</span><span class="why">${esc(why)}</span></div>`;
+      }).join("")}</div>
+      <p class="note" style="margin:13px 0 0">
+        <strong>allow</strong> is every row passing. One ✕ holds the action —
+        that is plain Python over the numbers above, not a second opinion from the model.</p>`;
+  }
+
+  $("ask").onclick = async () => {
+    const btn = $("ask"); btn.disabled = true; btn.textContent = "Asking…";
+    try {
+      const r = await fetch("v1/decide", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: $("f-task").value, proposed_action: $("f-act").value, context: $("f-ctx").value }),
+      });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+      renderResult(body);
+      loadFeed();
+    } catch (err) {
+      $("result").classList.remove("hide");
+      $("result").innerHTML = `<div class="banner warn"><h3>The gate could not answer</h3>
+        <p>${esc(err.message)}</p><p>Nothing was allowed. A gate that cannot answer is not permission.</p></div>`;
+    } finally { btn.disabled = false; btn.textContent = "Ask the gate"; }
+  };
+
+  // ── panels ─────────────────────────────────────────────────────────────
+  async function loadCalibration() {
+    const r = await fetch("v1/calibration"); if (!r.ok) return;
+    const c = await r.json();
+    state.policyThreshold = c.policy?.autonomy_threshold ?? 0.85;
+    if (!state.rows.length) { state.threshold = state.policyThreshold; $("thr").value = state.threshold; $("thr-val").textContent = state.threshold.toFixed(2); }
+    const fields = c.fields || {}, names = Object.keys(fields), rep = c.report;
+    $("calib").innerHTML = `
+      <table><tbody>
+        <tr><td style="width:44%">Fitted parameters</td><td>${names.length
+          ? names.map((n) => `<span class="mono">${esc(n)}: ${esc(JSON.stringify(fields[n]))}</span>`).join("<br>")
+          : '<span class="muted">none — running on type defaults</span>'}</td></tr>
+        <tr><td>Policy floor on P(safe)</td><td class="num">${fmt(c.policy?.autonomy_threshold)}</td></tr>
+        <tr><td>Risk / blast ceilings</td><td class="num">${c.policy?.max_risk_level} / ${c.policy?.max_blast_level}</td></tr>
+        ${rep ? `<tr><td>Metric, before → after</td><td class="num">${fmt(rep.train_score_before, 3)} → ${fmt(rep.train_score, 3)}
+            ${rep.val_score != null ? ` <span class="muted">(held out ${fmt(rep.val_score_before, 3)} → ${fmt(rep.val_score, 3)})</span>` : ""}</td></tr>
+          <tr><td>Unsafe actions caught after fitting</td><td class="num">${pct(rep.safety_recall_after)}</td></tr>`
+          : `<tr><td>Calibration report</td><td class="muted">none yet — run <span class="mono">dspy-jev calibrate</span></td></tr>`}
+      </tbody></table>`;
+  }
+
+  async function loadFeed() {
+    const r = await fetch("v1/decisions?limit=25"); if (!r.ok) return;
+    const { decisions } = await r.json();
+    $("feed").innerHTML = decisions.length ? `<table><thead><tr>
+        <th>Action</th><th>Verdict</th><th class="num">P(safe)</th><th>Why held</th><th class="num">ms</th>
+      </tr></thead><tbody>${decisions.map((d) => `<tr>
+        <td>${esc(d.action)}</td>
+        <td><span class="pill ${d.allow ? "allow" : "hold"}">${d.allow ? "allow" : d.route}</span></td>
+        <td class="num">${fmt(d.probability)}</td>
+        <td class="muted">${esc((d.reasons || []).join("; ")) || "—"}</td>
+        <td class="num">${Math.round(d.latency_ms)}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted" style="margin:0">Nothing yet. Ask the gate something above.</p>`;
+  }
+
+  async function loadLens() {
+    $("lens-empty").textContent = "Running the labelled dataset through the gate — the first pass calls the model, later ones are cached…";
+    try {
+      const r = await fetch("v1/lens");
+      if (!r.ok) {
+        const b = await r.json().catch(() => ({}));
+        throw new Error(b.detail || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      state.rows = (data.rows || []).filter((x) => x.probability != null);
+      if (!state.rows.length) {
+        $("lens-empty").textContent = data.error
+          || "No probabilities came back. The model may not be returning evidence — check `dspy-jev doctor`.";
+        return;
+      }
+      $("lens-empty").classList.add("hide");
+      draw();
+    } catch (err) {
+      $("lens-empty").innerHTML = `Could not build the lens: ${esc(err.message)}`;
+    }
+  }
+
+  async function boot() {
+    try {
+      const r = await fetch("healthz"), h = await r.json();
+      state.live = h.checks?.lm === true;
+      $("status").textContent = state.live
+        ? `${h.harness} · ${h.model} · ${h.calibrated ? "calibrated" : "type defaults"}`
+        : "no model connected";
+      if (!state.live) {
+        $("setup").classList.remove("hide");
+        $("setup-why").textContent = "The service started without a provider key, so it can answer /healthz but not judge anything.";
+        $("lens-empty").textContent = "The lens needs a model to report probabilities.";
+      }
+    } catch { $("status").textContent = "service unreachable"; }
+    await loadCalibration();
+    await loadFeed();
+    if (state.live) await loadLens();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

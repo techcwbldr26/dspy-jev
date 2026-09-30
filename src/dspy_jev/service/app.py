@@ -11,11 +11,12 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import dspy
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from dspy_jev import __version__
 from dspy_jev.config import Settings, get_settings
@@ -28,6 +29,12 @@ from dspy_jev.observability import (
     policy_span,
 )
 from dspy_jev.program import ActionGateProgram, TicketTriageProgram
+from dspy_jev.service.dashboard import (
+    DecisionLog,
+    calibration_summary,
+    lens_rows,
+    threshold_tradeoff,
+)
 from dspy_jev.service.schemas import (
     DecideRequest,
     DecideResponse,
@@ -40,6 +47,10 @@ from dspy_jev.service.schemas import (
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
+
+#: The dashboard is a single self-contained file served from this package, so it
+#: works offline, needs no build step, and shares an origin with the API.
+DASHBOARD_HTML = Path(__file__).with_name("dashboard.html")
 
 
 class AppState:
@@ -59,6 +70,8 @@ class AppState:
         self.triage = triage or TicketTriageProgram()
         self.calibrated = False
         self.lm_error: str | None = None
+        self.decisions = DecisionLog()
+        self._lens: dict[str, Any] | None = None
 
     def start(self) -> None:
         """Wire observability, resolve the LM, load the calibration artifact."""
@@ -235,6 +248,7 @@ def create_app(
         METRICS.increment(
             "dspy_jev_decisions_total", outcome="allow" if decision.allow else "hold", route=decision.route
         )
+        state.decisions.record(request_id=_request_id(request), action=payload.proposed_action, decision=decision)
         return DecideResponse(
             allow=decision.allow,
             route=decision.route,
@@ -246,6 +260,57 @@ def create_app(
             request_id=_request_id(request),
             metadata=decision.metadata,
         )
+
+    # --- dashboard --------------------------------------------------------------
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard() -> HTMLResponse:
+        """The console. One file, no build step, same origin as the API."""
+        if not DASHBOARD_HTML.exists():  # pragma: no cover - packaging failure
+            raise HTTPException(status_code=404, detail="dashboard.html is not installed")
+        return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))
+
+    @app.get("/v1/decisions", tags=["dashboard"], dependencies=[Depends(require_api_key)])
+    async def decisions(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, Any]:
+        """Recent decisions, newest first. In memory only -- inputs are user data."""
+        return {"decisions": state.decisions.recent(limit), "total": len(state.decisions)}
+
+    @app.get("/v1/calibration", tags=["dashboard"], dependencies=[Depends(require_api_key)])
+    async def calibration() -> dict[str, Any]:
+        """The fitted parameters in force, and the report that produced them."""
+        return {
+            "calibrated": state.calibrated,
+            "policy": {
+                "autonomy_threshold": state.gate.autonomy_threshold,
+                "max_risk_level": state.gate.max_risk_level,
+                "max_blast_level": state.gate.max_blast_level,
+            },
+            **calibration_summary(settings, fields=dict(state.gate.gate.fields)),
+        }
+
+    @app.get("/v1/lens", tags=["dashboard"], dependencies=[Depends(require_api_key)])
+    async def lens(
+        threshold: float = Query(default=None, ge=0.0, le=1.0),
+        refresh: bool = Query(default=False),
+    ) -> dict[str, Any]:
+        """One row per labelled example: the human label beside the model's probability.
+
+        This is what makes the threshold trade-off visible. The first call runs
+        the dataset through the gate; DSPy's cache makes later calls free.
+        """
+        if not state.ready:
+            raise HTTPException(status_code=503, detail=state.lm_error or "no language model configured")
+        if state._lens is None or refresh:
+            try:
+                state._lens = lens_rows(state.gate, settings)
+            except Exception as exc:  # reported to the dashboard rather than crashing it
+                logger.exception("lens.failed")
+                raise HTTPException(status_code=502, detail=f"lens failed: {exc}") from exc
+        cut = state.gate.autonomy_threshold if threshold is None else threshold
+        return {
+            **state._lens,
+            "threshold": cut,
+            "tradeoff": threshold_tradeoff(state._lens["rows"], cut),
+        }
 
     @app.post(
         "/v1/triage",

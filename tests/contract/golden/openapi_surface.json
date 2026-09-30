@@ -8,8 +8,17 @@
   "/readyz": [
     "get"
   ],
+  "/v1/calibration": [
+    "get"
+  ],
   "/v1/decide": [
     "post"
+  ],
+  "/v1/decisions": [
+    "get"
+  ],
+  "/v1/lens": [
+    "get"
   ],
   "/v1/triage": [
     "post"

@@ -43,6 +43,7 @@ dspy-jev decide --task "free up disk space" \
 # exit 10, route: block
 ```
 
+- **The console** → `dspy-jev serve`, then open <http://127.0.0.1:8080>
 - **Harness guides** → [hermes-agent](docs/harnesses/hermes-agent.md) · [Pi](docs/harnesses/pi.md) · [Claude Code](docs/harnesses/claude-code.md)
 - **Models and retirements** → [`docs/models.md`](docs/models.md)
 - **Observability** → [`docs/observability.md`](docs/observability.md)
@@ -106,6 +107,25 @@ An auditor reads that without reading a prompt. It is tested without a model at
 all. A harness can raise its own bar without recalibrating. And during an
 incident you change `DSPY_JEV_AUTONOMY_THRESHOLD` and it takes effect on the
 next request.
+
+### You can see what it is doing
+
+`dspy-jev serve` also serves a console at `/`. One self-contained file, no build
+step, no CDN — it works on a laptop with no network but a reachable gate.
+
+Its centrepiece is the **threshold lens**: every labelled action in your dataset,
+placed by the probability the model gave it, with the actions a person labelled
+safe on one row and unsafe on the other. A draggable line is the threshold.
+
+Drag it and the verdicts change — but nothing is re-run. The probabilities are
+already in; only the local cut moves. Two counts update as you drag: how many
+unsafe actions would slip through, and how much safe work you would block. That
+trade-off is the whole of calibration, and it is the one thing a log line cannot
+show you.
+
+The page also has a policy chain for a single decision (which of the six
+conditions failed, and by how much), a live feed of recent decisions, and the
+fitted parameters currently in force.
 
 ### It blocks, rather than suggesting
 
@@ -187,6 +207,7 @@ carry user data — and credential-shaped keys are redacted at any depth.
 | **Two artifacts to keep in step** | Open-weight and Claude backends produce differently-shaped distributions, so each harness family needs its own calibration and its own recalibration. |
 | **Cloud models get retired** | Ollama retires models on a schedule. `doctor` and a weekly workflow catch it, but a retirement means recalibrating. |
 | **Enforcement is per-harness** | Each harness needs its own interception point, and they are only as good as that harness's hook surface. The Claude Code `PreToolUse` hook and the Pi `tool_call` handler are true controls; `dspy-jev guard` covers harnesses with no hook at all, but only for commands actually run through it. |
+| **The lens needs a labelled dataset** | With no labels there is nothing to plot the threshold against, so the console's centrepiece is empty until you have one. |
 | **Triage exists twice** | The Python and TypeScript classifiers must agree, or one harness gates something the other does not. A parity test over 49 cases fails on any disagreement, but it is a test, not a shared implementation. |
 | **A gate can be talked around** | The signature says to treat inputs as data, there is a labelled row for it and tests that the preambles forbid rewording, but an agent that rephrases until it passes is a real failure mode. Log and review verdicts. |
 | **Bootstrap cost** | Datasets, thresholds, a service, a runbook. For a two-person project running one agent, a hard-coded deny-list is cheaper and you should use that instead. |
@@ -260,6 +281,7 @@ src/dspy_jev/
   observability.py   MLflow autolog, audit callback, redaction, metrics
   enforce.py         Triage, action rendering, fail-closed verdicts for the hooks
   service/           FastAPI: /v1/decide, /v1/triage, /healthz, /readyz, /metrics
+                     plus the console at / and the data it reads
   mcp_server.py      MCP tools, in-process or proxying to the service
   cli.py             doctor, models, decide, guard, triage, calibrate, evaluate, serve, mcp
 
