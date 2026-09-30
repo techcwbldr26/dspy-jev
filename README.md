@@ -35,15 +35,26 @@ export OLLAMA_API_KEY=...            # https://ollama.com/settings/keys
 ./scripts/setup_pi.sh                # or setup_hermes_agent.sh / setup_claude_code.sh
 source .venv/bin/activate
 
-dspy-jev doctor                      # credentials, models, calibration
+dspy-jev doctor --probe              # proves the provider actually answers
 dspy-jev calibrate --dataset data/action_gate.jsonl
+dspy-jev serve                       # console at http://127.0.0.1:8080
+```
+
+In another shell:
+
+```bash
 dspy-jev decide --task "free up disk space" \
                 --action "delete the contents of /var/lib/docker" \
                 --context "shared CI runner, three teams building now"
 # exit 10, route: block
 ```
 
-- **The console** → `dspy-jev serve`, then open <http://127.0.0.1:8080>
+Running in a **Claude Code cloud session**? Two extra settings are needed, and one
+of them is easy to miss — [`docs/setup.md`](docs/setup.md) has them with
+screenshots.
+
+- **Setup, step by step, with screenshots** → [`docs/setup.md`](docs/setup.md)
+- **The console** → [`docs/console.md`](docs/console.md)
 - **Harness guides** → [hermes-agent](docs/harnesses/hermes-agent.md) · [Pi](docs/harnesses/pi.md) · [Claude Code](docs/harnesses/claude-code.md)
 - **Models and retirements** → [`docs/models.md`](docs/models.md)
 - **Observability** → [`docs/observability.md`](docs/observability.md)
@@ -113,19 +124,34 @@ next request.
 `dspy-jev serve` also serves a console at `/`. One self-contained file, no build
 step, no CDN — it works on a laptop with no network but a reachable gate.
 
+![The dspy-jev console](docs/images/console-light.png)
+
 Its centrepiece is the **threshold lens**: every labelled action in your dataset,
 placed by the probability the model gave it, with the actions a person labelled
 safe on one row and unsafe on the other. A draggable line is the threshold.
 
 Drag it and the verdicts change — but nothing is re-run. The probabilities are
-already in; only the local cut moves. Two counts update as you drag: how many
-unsafe actions would slip through, and how much safe work you would block. That
-trade-off is the whole of calibration, and it is the one thing a log line cannot
-show you.
+already in; only the local cut moves. Two counts trade against each other as you
+drag. At `0.85`, nothing unsafe slips through but 14 safe actions are blocked. At
+`0.55`, nothing is blocked needlessly and **seven unsafe actions get through**:
 
-The page also has a policy chain for a single decision (which of the six
-conditions failed, and by how much), a live feed of recent decisions, and the
-fitted parameters currently in force.
+![The lens with the threshold dragged to 0.55](docs/images/lens-threshold-055.png)
+
+That trade-off is the whole of calibration, and it is the one thing a log line
+cannot show you.
+
+Ask about a real action and you also get the **policy chain** — which of the six
+conditions failed, and by how much. This layer is plain Python over the numbers,
+so when someone asks why an action was blocked, the row names the number to
+change:
+
+![The policy chain for a blocked action](docs/images/policy-chain.png)
+
+It follows your system theme:
+
+![The console in dark mode](docs/images/console-dark.png)
+
+Full tour: [`docs/console.md`](docs/console.md).
 
 ### It blocks, rather than suggesting
 
@@ -288,7 +314,8 @@ src/dspy_jev/
 harnesses/           Ready-to-copy assets per harness (skills, profiles, configs)
 scripts/             install.sh + setup_<harness>.sh + observability.sh
 data/                Labelled datasets
-docs/                Harness guides, models, observability, runbook
+docs/                Setup, console tour, harness guides, models, observability, runbook
+docs/images/         Screenshots used by the docs
 tests/               unit · contract · calibration · integration · live
 ```
 

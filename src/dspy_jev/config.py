@@ -12,6 +12,20 @@ from dspy_jev import models
 
 Harness = Literal["hermes-agent", "pi", "claude-code"]
 
+#: How the provider request gets authenticated.
+#:
+#: ``key``    -- this process holds the key and sends it (``OLLAMA_API_KEY``).
+#: ``proxy``  -- the platform injects the ``Authorization`` header on the way out
+#:               and this process never sees the secret. Used by Claude Code's
+#:               cloud "API credentials", and by any egress proxy that does the
+#:               same. A placeholder is still sent, because the OpenAI client
+#:               refuses to build a request without one.
+AuthMode = Literal["key", "proxy"]
+
+#: Sent as the API key in ``proxy`` mode. Inert on purpose: if it ever reaches a
+#: provider unchanged, the request fails loudly rather than succeeding oddly.
+PROXY_AUTH_PLACEHOLDER = "header-injected-by-platform"
+
 #: The Claude Code harness is the one documented exception to "open weights only".
 HARNESS_PROVIDER: dict[str, models.Provider] = {
     "hermes-agent": "ollama_cloud",
@@ -48,6 +62,11 @@ class Settings(BaseSettings):
     ollama_api_key: SecretStr | None = Field(default=None, alias="OLLAMA_API_KEY")
     ollama_base_url: str = Field(default=models.OLLAMA_CLOUD_BASE_URL, alias="OLLAMA_BASE_URL")
     anthropic_api_key: SecretStr | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    auth_mode: AuthMode = Field(
+        default="key",
+        description="'key' reads the provider key from the environment; 'proxy' expects the "
+        "platform to inject the Authorization header and sends a placeholder.",
+    )
 
     # --- model selection (empty string means "use the registry default") -------
     decision_model: str = ""
@@ -114,10 +133,23 @@ class Settings(BaseSettings):
         return override or models.default_for(self.provider, role)
 
     def api_key_for(self, provider: models.Provider | None = None) -> str | None:
-        """Plain-text API key for a provider family, or ``None`` when unset."""
+        """The value to send as the API key, or ``None`` when nothing is available.
+
+        In ``proxy`` mode this is a placeholder: the real credential is added to
+        the request by the platform, and never enters this process.
+        """
         provider = provider or self.provider
         secret = self.ollama_api_key if provider == "ollama_cloud" else self.anthropic_api_key
-        return secret.get_secret_value() if secret else None
+        if secret:
+            return secret.get_secret_value()
+        return PROXY_AUTH_PLACEHOLDER if self.auth_mode == "proxy" else None
+
+    @property
+    def auth_description(self) -> str:
+        """One line for `doctor` and `/healthz`, naming where auth comes from."""
+        if self.auth_mode == "proxy":
+            return "platform-injected Authorization header (no key in this process)"
+        return "key read from the environment"
 
     @property
     def calibrated_artifact(self) -> Path:

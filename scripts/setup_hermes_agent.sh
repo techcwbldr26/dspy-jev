@@ -9,10 +9,13 @@ step "setting up the $HARNESS harness (Ollama Cloud, open weights)"
 
 "$DSPY_JEV_ROOT/scripts/install.sh" "service,observability,mcp"
 
-require_key OLLAMA_API_KEY "Create one at https://ollama.com/settings/keys" || true
+AUTH_MODE="$(detect_auth_mode OLLAMA_API_KEY)"
+require_key OLLAMA_API_KEY "Create one at https://ollama.com/settings/keys" "$AUTH_MODE" || true
+network_note
 
 write_env_file "$HARNESS" \
   "OLLAMA_API_KEY=${OLLAMA_API_KEY:-}" \
+  "DSPY_JEV_AUTH_MODE=$AUTH_MODE" \
   "DSPY_JEV_DECISION_MODEL=glm-5.3" \
   "DSPY_JEV_FAST_MODEL=glm-5.3-flash" \
   "DSPY_JEV_JUDGE_MODEL=deepseek-v4-pro" \
@@ -51,6 +54,8 @@ command did NOT run.
 The profile holds no model credentials: only DSPY_JEV_SERVICE_URL and, if you
 set one, DSPY_JEV_SERVICE_API_KEY. The service holds the Ollama key.
 
-Calibrate before relying on it:
+Confirm the provider really answers, then calibrate, then look at it:
+    dspy-jev doctor --probe
     dspy-jev calibrate --dataset data/action_gate.jsonl
+    dspy-jev serve            # console at http://127.0.0.1:8080
 NEXT

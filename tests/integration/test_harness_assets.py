@@ -293,3 +293,73 @@ def test_every_harness_documents_that_a_gate_failure_is_a_hold():
         # Collapse wrapping: these are prose files, so the phrase spans line breaks.
         text = " ".join(path.read_text().lower().split())
         assert "is not permission" in text, path
+
+
+# --- documentation ----------------------------------------------------------------
+
+DOCS = REPO_ROOT / "docs"
+IMAGES = DOCS / "images"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "setup-1-open-environment.png",
+        "setup-2-network-access.png",
+        "setup-3-api-credentials.png",
+        "setup-4-add-credential.png",
+        "console-light.png",
+        "console-dark.png",
+        "lens-threshold-055.png",
+        "policy-chain.png",
+    ],
+)
+def test_every_documented_image_exists(name: str):
+    path = IMAGES / name
+    assert path.exists(), f"missing {path}"
+    assert path.stat().st_size > 5_000, f"{name} looks truncated"
+
+
+def test_no_markdown_link_points_at_a_missing_image():
+    """A broken image in a setup guide is worse than no image."""
+    import re
+
+    missing = []
+    for doc in [*DOCS.rglob("*.md"), REPO_ROOT / "README.md"]:
+        for target in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", doc.read_text(encoding="utf-8")):
+            if target.startswith("http"):
+                continue
+            if not (doc.parent / target).resolve().exists():
+                missing.append(f"{doc.relative_to(REPO_ROOT)} -> {target}")
+    assert not missing, "broken image links:\n" + "\n".join(missing)
+
+
+def test_the_setup_guide_covers_both_cloud_settings():
+    """Network access and API credentials are separate, and both are easy to miss."""
+    text = (DOCS / "setup.md").read_text(encoding="utf-8")
+    assert "Network access" in text
+    assert "proxy refused CONNECT" in text, "the 403 symptom must be searchable"
+    assert "API credentials" in text
+    assert "Environment variables" in text, "must say which box NOT to use"
+
+
+def test_the_setup_guide_never_tells_anyone_to_paste_a_key_into_chat():
+    text = (DOCS / "setup.md").read_text(encoding="utf-8").lower()
+    assert "do not paste the key into a chat" in text
+
+
+def test_the_setup_guide_documents_both_auth_modes():
+    text = (DOCS / "setup.md").read_text(encoding="utf-8")
+    assert "DSPY_JEV_AUTH_MODE=proxy" in text
+    assert "doctor --probe" in text
+
+
+def test_the_scripts_understand_both_auth_modes():
+    lib = (REPO_ROOT / "scripts" / "lib.sh").read_text(encoding="utf-8")
+    assert "detect_auth_mode" in lib
+    assert "network_note" in lib
+    for name in ("setup_pi.sh", "setup_hermes_agent.sh", "setup_claude_code.sh"):
+        script = (REPO_ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert "detect_auth_mode" in script, name
+        assert "DSPY_JEV_AUTH_MODE=$AUTH_MODE" in script, f"{name} must record the mode in .env"
+        assert "doctor --probe" in script, f"{name} must point at the probe"
