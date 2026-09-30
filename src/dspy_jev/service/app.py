@@ -26,7 +26,6 @@ from dspy_jev.observability import (
     METRICS,
     configure_observability,
     install_audit_callback,
-    policy_span,
 )
 from dspy_jev.program import ActionGateProgram, TicketTriageProgram
 from dspy_jev.service.dashboard import (
@@ -234,18 +233,13 @@ def create_app(
             gate.gate.fields = dict(state.gate.gate.fields)
             gate.gate.demos = list(state.gate.gate.demos)
 
-        with policy_span(
-            "dspy_jev.decide",
-            {"task": payload.task, "proposed_action": payload.proposed_action, "context": payload.context},
-        ):
-            try:
-                decision = gate.decide(
-                    task=payload.task, proposed_action=payload.proposed_action, context=payload.context
-                )
-            except Exception as exc:
-                METRICS.increment("dspy_jev_decisions_total", outcome="error")
-                logger.exception("decide.failed", extra={"request_id": _request_id(request)})
-                raise HTTPException(status_code=502, detail=f"decision failed: {exc}") from exc
+        # The span lives in ActionGateProgram.decide, so every caller traces alike.
+        try:
+            decision = gate.decide(task=payload.task, proposed_action=payload.proposed_action, context=payload.context)
+        except Exception as exc:
+            METRICS.increment("dspy_jev_decisions_total", outcome="error")
+            logger.exception("decide.failed", extra={"request_id": _request_id(request)})
+            raise HTTPException(status_code=502, detail=f"decision failed: {exc}") from exc
 
         METRICS.increment(
             "dspy_jev_decisions_total", outcome="allow" if decision.allow else "hold", route=decision.route

@@ -163,6 +163,10 @@ def test_uncached_clients_are_refused_by_default(settings, miscalibrated_lm, tra
         )
 
 
+# ReAnchor's fitting stage scales with the training set, and the labelled
+# dataset is 140 rows. Calibrating the real file end to end is the point of
+# this test, so it gets the time rather than a smaller stand-in dataset.
+@pytest.mark.timeout(600)
 def test_end_to_end_calibration_writes_an_artifact_and_a_report(
     settings, tmp_path: Path, dataset_path: Path, configured_dspy
 ):

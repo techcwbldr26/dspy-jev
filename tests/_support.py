@@ -9,6 +9,7 @@ derives a value from evidence will fail them.
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from typing import Any
 
 from dspy.utils.dummies import DummyLM
@@ -79,7 +80,15 @@ def triage_evidence(*, urgent: float = 0.9, severity_level: int = 2, category: s
     }
 
 
-def stub_lm(evidence: dict[str, Any] | list[dict[str, Any]], repeats: int = 64) -> DummyLM:
+#: Enough replays to drive the whole labelled dataset through the gate several
+#: times over. Derived from the file rather than hard-coded, because a fixed
+#: count silently rots the moment the dataset grows: the stub drains mid-run and
+#: every test that builds the lens fails on a parse error instead of its
+#: assertion.
+STUB_REPEATS = 4 * sum(1 for _ in (Path(__file__).parent.parent / "data" / "action_gate.jsonl").open()) + 64
+
+
+def stub_lm(evidence: dict[str, Any] | list[dict[str, Any]], repeats: int = STUB_REPEATS) -> DummyLM:
     """A DummyLM that replays evidence.
 
     ``repeats`` guards against exhaustion: DSPy may call the LM more than once

@@ -24,6 +24,7 @@ import dspy
 
 from dspy_jev.config import Settings, get_settings
 from dspy_jev.decisions import ActionGate, TicketTriage, decision_record
+from dspy_jev.observability import policy_span
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
@@ -90,11 +91,21 @@ class ActionGateProgram(dspy.Module):
         return self.gate(task=task, proposed_action=proposed_action, context=context)
 
     def decide(self, task: str, proposed_action: str, context: str = "") -> GateDecision:
-        """Run the gate and apply the policy layer."""
+        """Run the gate and apply the policy layer.
+
+        The span opens here rather than at each call site, so a trace has the
+        same shape whoever asked -- the service, the CLI, ``guard`` or the MCP
+        server. DSPy's own spans nest underneath it, which is what makes the
+        policy layer legible as the step above the model rather than beside it.
+        """
         started = time.perf_counter()
-        prediction = self(task=task, proposed_action=proposed_action, context=context)
-        latency_ms = (time.perf_counter() - started) * 1000
-        return self.apply_policy(prediction, latency_ms=latency_ms)
+        with policy_span(
+            "dspy_jev.decide",
+            {"task": task, "proposed_action": proposed_action, "context": context},
+        ):
+            prediction = self(task=task, proposed_action=proposed_action, context=context)
+            latency_ms = (time.perf_counter() - started) * 1000
+            return self.apply_policy(prediction, latency_ms=latency_ms)
 
     # -- policy ------------------------------------------------------------------
     def apply_policy(self, prediction: dspy.Prediction, *, latency_ms: float = 0.0) -> GateDecision:
