@@ -141,6 +141,13 @@
   .banner p { margin:0 0 6px; color:var(--ink-2); }
   .banner code { background:var(--plane); padding:1px 5px; border-radius:4px; font-size:12.5px; }
   .hide { display:none !important; }
+  .sinks { display:flex; flex-direction:column; gap:1px; background:var(--ring); border:1px solid var(--ring); border-radius:9px; overflow:hidden; margin-top:18px; }
+  .sink { display:flex; align-items:baseline; gap:11px; background:var(--surface); padding:10px 14px; font-size:13.5px; }
+  .sink .dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:var(--muted); align-self:center; }
+  .sink.live .dot { background:var(--series); }
+  .sink .name { font-weight:600; min-width:9.5em; }
+  .sink .state { font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); min-width:3.6em; }
+  .sink .detail { color:var(--ink-2); margin-left:auto; text-align:right; font-size:12.5px; word-break:break-all; }
   .muted { color:var(--muted); }
   #tip { position:fixed; pointer-events:none; z-index:50; max-width:320px; background:var(--surface);
          color:var(--ink); border:1px solid var(--axis); border-radius:9px; padding:9px 11px;
@@ -239,6 +246,13 @@
     <h2>Recent decisions</h2>
     <p class="note">Held in memory only. The audit log is the durable record, and it redacts inputs.</p>
     <div id="feed"></div>
+  </section>
+
+  <section class="card">
+    <h2>Observability</h2>
+    <p class="note">One set of callbacks feeds all of these. This panel is the one that needs nothing
+      else running; the others are where you go when a single decision has to be explained.</p>
+    <div id="obs"></div>
   </section>
 
 </div>
@@ -397,7 +411,7 @@
       <div class="tile"><div class="k">Threshold</div>
         <div class="v">${state.threshold.toFixed(2)}</div>
         <div class="d">${Math.abs(state.threshold - state.policyThreshold) < 0.005
-          ? "the policy setting" : `policy is ${state.policyThreshold.toFixed(2)}`}</div></div>`;
+          ? "the setting in force" : `in force: ${state.policyThreshold.toFixed(2)}`}</div></div>`;
   }
 
   function renderLensTable(t) {
@@ -426,7 +440,7 @@
   const CHAIN = [
     ["route",           "Route is auto_execute"],
     ["safe",            "Model judged it safe"],
-    ["prob",            "Confidence clears the policy floor"],
+    ["prob",            "Probability clears the policy floor"],
     ["risk",            "Risk within the ceiling"],
     ["blast",           "Blast radius within the ceiling"],
     ["rev",             "Undoable without another person"],
@@ -434,9 +448,15 @@
   function chainOf(res) {
     const d = res.decisions || {}, meta = res.metadata || {};
     const prob = d.safe_to_proceed?.probability, risk = d.risk?.level, blast = d.blast_radius?.level;
+    // Two different bars sit on the same probability, and saying so stops the
+    // chain reading as a contradiction: 0.85 can clear the floor and still miss
+    // the fitted threshold, which is what turns the Noul's value False.
+    const fitted = meta.fields?.safe_to_proceed?.threshold;
     return {
       route: [res.route === "auto_execute", `is ${res.route}`],
-      safe:  [d.safe_to_proceed?.value === true, d.safe_to_proceed?.value ? "" : "judged unsafe"],
+      safe:  [d.safe_to_proceed?.value === true,
+              fitted != null ? `${fmt(prob)} vs fitted ${fmt(fitted)}`
+                             : (d.safe_to_proceed?.value ? "" : "judged unsafe")],
       prob:  [prob != null && prob >= (meta.autonomy_threshold ?? 0), `${fmt(prob)} vs ${fmt(meta.autonomy_threshold)}`],
       risk:  [risk != null && risk <= (meta.max_risk_level ?? 0), `${risk} vs max ${meta.max_risk_level}`],
       blast: [blast != null && blast <= (meta.max_blast_level ?? 0), `${blast} vs max ${meta.max_blast_level}`],
@@ -488,7 +508,11 @@
   async function loadCalibration() {
     const r = await fetch("v1/calibration"); if (!r.ok) return;
     const c = await r.json();
-    state.policyThreshold = c.policy?.autonomy_threshold ?? 0.85;
+    // The bar an action must actually clear: the fitted Noul threshold and the
+    // policy floor both apply, so the effective one is the higher of the two.
+    state.policyThreshold = c.policy?.effective_threshold ?? c.policy?.autonomy_threshold ?? 0.85;
+    state.floor = c.policy?.autonomy_threshold ?? 0.85;
+    state.fitted = c.fields?.safe_to_proceed?.threshold ?? null;
     if (!state.rows.length) { state.threshold = state.policyThreshold; $("thr").value = state.threshold; $("thr-val").textContent = state.threshold.toFixed(2); }
     const fields = c.fields || {}, names = Object.keys(fields), rep = c.report;
     $("calib").innerHTML = `
@@ -496,10 +520,12 @@
         <tr><td style="width:44%">Fitted parameters</td><td>${names.length
           ? names.map((n) => `<span class="mono">${esc(n)}: ${esc(JSON.stringify(fields[n]))}</span>`).join("<br>")
           : '<span class="muted">none — running on type defaults</span>'}</td></tr>
-        <tr><td>Policy floor on P(safe)</td><td class="num">${fmt(c.policy?.autonomy_threshold)}</td></tr>
+        <tr><td>Effective threshold on P(safe)</td><td class="num"><strong>${fmt(c.policy?.effective_threshold)}</strong>
+          <span class="muted">— the higher of the fitted ${fmt(c.fields?.safe_to_proceed?.threshold) }
+          and the policy floor ${fmt(c.policy?.autonomy_threshold)}; both apply</span></td></tr>
         <tr><td>Risk / blast ceilings</td><td class="num">${c.policy?.max_risk_level} / ${c.policy?.max_blast_level}</td></tr>
-        ${rep ? `<tr><td>Metric, before → after</td><td class="num">${fmt(rep.train_score_before, 3)} → ${fmt(rep.train_score, 3)}
-            ${rep.val_score != null ? ` <span class="muted">(held out ${fmt(rep.val_score_before, 3)} → ${fmt(rep.val_score, 3)})</span>` : ""}</td></tr>
+        ${rep ? `<tr><td>Metric, before → after</td><td class="num">${fmt(rep.train_score_before, 3)} → ${fmt(rep.train_score_after, 3)}
+            ${rep.val_score_after != null ? ` <span class="muted">(held out ${fmt(rep.val_score_before, 3)} → ${fmt(rep.val_score_after, 3)})</span>` : ""}</td></tr>
           <tr><td>Unsafe actions caught after fitting</td><td class="num">${pct(rep.safety_recall_after)}</td></tr>`
           : `<tr><td>Calibration report</td><td class="muted">none yet — run <span class="mono">dspy-jev calibrate</span></td></tr>`}
       </tbody></table>`;
@@ -517,6 +543,43 @@
         <td class="muted">${esc((d.reasons || []).join("; ")) || "—"}</td>
         <td class="num">${Math.round(d.latency_ms)}</td></tr>`).join("")}</tbody></table>`
       : `<p class="muted" style="margin:0">Nothing yet. Ask the gate something above.</p>`;
+  }
+
+  const SINKS = [
+    ["audit_log", "Audit log",  "One JSON record per module, model and tool call. The durable record."],
+    ["metrics",   "Metrics",    "Counters and latency quantiles for your existing scrape."],
+    ["tracing",   "MLflow traces", "The full call tree for one decision: prompt, evidence, tokens."],
+    ["otel",      "OpenTelemetry", "The same spans in your own collector instead."],
+  ];
+  async function loadObservability() {
+    const r = await fetch("v1/observability"); if (!r.ok) return;
+    const o = await r.json();
+    const d = o.decisions || {}, m = o.model_calls || {};
+    const dec = o.decision_latency, lm = o.latency?.dspy_jev_lm_latency;
+    const tracing = o.sinks?.tracing;
+    const url = tracing?.on && /^https?:\/\//.test(tracing.detail || "") ? tracing.detail : null;
+    $("obs").innerHTML = `
+      <div class="tiles">
+        <div class="tile"><div class="k">Decisions served</div><div class="v">${d.total ?? 0}</div>
+          <div class="d">${d.allowed ?? 0} allowed · ${d.held ?? 0} held</div></div>
+        <div class="tile"><div class="k">Model calls</div><div class="v">${m.ok ?? 0}</div>
+          <div class="d">${m.error ? `${m.error} failed · ` : "none failed · "}median ${lm ? Math.round(lm.p50_ms) : "—"} ms</div></div>
+        <div class="tile"><div class="k">Median decision</div><div class="v">${dec ? Math.round(dec.p50_ms) : "—"}<span style="font-size:15px"> ms</span></div>
+          <div class="d">${dec ? `95th ${Math.round(dec.p95_ms)} ms · slowest ${Math.round(dec.max_ms)} ms` : "nothing decided yet"}</div></div>
+      </div>
+      <div class="sinks">${SINKS.map(([key, name, why]) => {
+        const sink = o.sinks?.[key] || {};
+        return `<div class="sink ${sink.on ? "live" : ""}">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="name">${esc(name)}</span>
+          <span class="state">${sink.on ? "live" : "off"}</span>
+          <span class="detail">${sink.on && key === "tracing" && url
+              ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`
+              : esc(sink.detail || "")}<br><span class="muted">${esc(why)}</span></span></div>`;
+      }).join("")}</div>
+      ${tracing?.on ? "" : `<p class="note" style="margin:14px 0 0">Traces are the fastest way to see <em>why</em> a
+        probability came out as it did. Start a local server with <span class="mono">scripts/observability_up.sh</span>,
+        then restart the service with <span class="mono">DSPY_JEV_MLFLOW_ENABLED=true</span>.</p>`}`;
   }
 
   async function loadLens() {
@@ -556,6 +619,7 @@
     } catch { $("status").textContent = "service unreachable"; }
     await loadCalibration();
     await loadFeed();
+    await loadObservability();
     if (state.live) await loadLens();
   }
   boot();

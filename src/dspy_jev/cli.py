@@ -214,12 +214,13 @@ def _prepare_runtime(settings: Settings, *, calibration: Path | None = None):
     import dspy
 
     from dspy_jev.lm import build_lm
-    from dspy_jev.observability import DecisionAuditCallback, configure_observability
+    from dspy_jev.observability import configure_observability, install_audit_callback
     from dspy_jev.program import ActionGateProgram
 
     configure_observability(settings)
     lm = build_lm("decision", settings=settings)
-    dspy.configure(lm=lm, callbacks=[DecisionAuditCallback(settings)])
+    dspy.configure(lm=lm)
+    install_audit_callback(settings)
     gate = ActionGateProgram(settings=settings)
     gate.load_calibration(calibration)
     return gate

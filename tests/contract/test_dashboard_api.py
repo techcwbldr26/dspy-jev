@@ -6,6 +6,8 @@ silently, so they get the same contract treatment as /v1/decide.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -209,3 +211,97 @@ def test_a_missing_probability_counts_as_held_not_allowed():
     """Absent evidence must never read as permission."""
     rows = [{"label_safe": False, "probability": None}]
     assert threshold_tradeoff(rows, 0.5)["false_allows"] == 0
+
+
+# --- the effective threshold ------------------------------------------------------
+
+
+def test_the_effective_threshold_is_the_higher_of_the_two(settings):
+    """Two cuts must both be cleared; reporting either alone misstates the gate."""
+    from dspy_jev.program import ActionGateProgram
+    from dspy_jev.service.dashboard import effective_threshold
+
+    program = ActionGateProgram(settings=settings, autonomy_threshold=0.85)
+    assert effective_threshold(program) == 0.85, "no fitted value: the policy floor stands"
+
+    program.gate.fields["safe_to_proceed"] = {"threshold": 0.9}
+    assert effective_threshold(program) == 0.9, "a higher fitted threshold wins"
+
+    program.gate.fields["safe_to_proceed"] = {"threshold": 0.6}
+    assert effective_threshold(program) == 0.85, "a lower fitted threshold cannot loosen the floor"
+
+
+def test_the_lens_defaults_to_the_effective_threshold(settings, allow_lm, configured_dspy):
+    """Regression: it used to default to the policy floor, overstating the errors."""
+    from dspy_jev.program import ActionGateProgram
+
+    gate = ActionGateProgram(settings=settings, autonomy_threshold=0.85)
+    gate.gate.fields["safe_to_proceed"] = {"threshold": 0.9}
+    with TestClient(create_app(settings, lm=allow_lm, gate=gate)) as client:
+        assert client.get("/v1/lens").json()["threshold"] == pytest.approx(0.9)
+        assert client.get("/v1/calibration").json()["policy"]["effective_threshold"] == pytest.approx(0.9)
+
+
+def test_calibration_reports_both_thresholds_so_neither_is_mistaken(client):
+    policy = client.get("/v1/calibration").json()["policy"]
+    assert "autonomy_threshold" in policy
+    assert "effective_threshold" in policy
+
+
+def test_the_page_only_reads_report_keys_that_the_report_carries():
+    """Regression: the page read rep.train_score; the report writes train_score_after.
+
+    A typo here is silent — the cell renders an em dash and nobody notices.
+    So the page's `rep.<key>` reads are checked against the report's own shape.
+    """
+    import re
+
+    from dspy_jev.calibrate import CalibrationResult
+
+    keys = set(
+        CalibrationResult(
+            artifact_path=Path("a"),
+            report_path=Path("r"),
+            report={},
+            fields={},
+            train_score_before=0.0,
+            train_score_after=0.0,
+            val_score_before=None,
+            val_score_after=None,
+        ).to_dict()
+    )
+    read = set(re.findall(r"\brep\.([A-Za-z_][A-Za-z0-9_]*)", DASHBOARD_HTML.read_text(encoding="utf-8")))
+    assert read, "expected the page to read the calibration report"
+    assert read <= keys, f"the page reads keys the report never writes: {sorted(read - keys)}"
+
+
+# --- observability ----------------------------------------------------------------
+
+
+def test_observability_reports_throughput_and_which_sinks_are_live(client):
+    client.post("/v1/decide", json=PAYLOAD)
+    body = client.get("/v1/observability").json()
+
+    assert body["decisions"]["total"] >= 1
+    assert body["decisions"]["allowed"] + body["decisions"]["held"] == body["decisions"]["total"]
+    assert set(body["sinks"]) == {"audit_log", "metrics", "tracing", "otel"}
+    for sink in body["sinks"].values():
+        assert isinstance(sink["on"], bool)
+        assert sink["detail"], "a sink with no detail tells the reader nothing"
+
+
+def test_decision_latency_is_measured_over_decisions_not_over_every_request(client):
+    """The HTTP summary counts dashboard polling too, which is not what is asked."""
+    client.post("/v1/decide", json=PAYLOAD)
+    for _ in range(3):
+        client.get("/v1/calibration")
+
+    body = client.get("/v1/observability").json()
+    assert body["decision_latency"]["count"] == body["decisions"]["total"]
+    assert body["decision_latency"]["count"] < body["latency"]["dspy_jev_http_latency"]["count"]
+
+
+def test_observability_is_empty_but_well_shaped_before_anything_happens(client):
+    body = client.get("/v1/observability").json()
+    assert body["decisions"]["total"] == 0
+    assert body["decision_latency"] is None, "no decisions means no latency to report, not a zero"

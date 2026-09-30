@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 import dspy
 import pytest
+from dspy.utils.callback import BaseCallback
 
 from dspy_jev.observability import (
+    MLFLOW_REQUEST_RETRIES,
     REDACTED,
     DecisionAuditCallback,
     JsonFormatter,
@@ -16,6 +19,7 @@ from dspy_jev.observability import (
     configure_mlflow,
     configure_observability,
     configure_otel,
+    install_audit_callback,
     policy_span,
     redact,
     setup_logging,
@@ -209,3 +213,35 @@ def test_policy_span_is_a_no_op_when_tracing_is_unconfigured():
     """Library code calls this unconditionally; it must never be the failure."""
     with policy_span("test", {"api_key": "sk-live"}) as span:
         assert span is None or span is not None
+
+
+def test_an_unreachable_tracking_server_does_not_stop_the_gate(settings, monkeypatch):
+    """Tracing is a nice-to-have. A tracking server that is down must degrade.
+
+    It used to take the process with it: MLflow's default retry budget is seven
+    attempts with backoff, so a dead server meant a minute of blocked startup.
+    """
+    settings = settings.model_copy(update={"mlflow_enabled": True, "mlflow_tracking_uri": "http://127.0.0.1:1"})
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_EXPERIMENT_ID", raising=False)
+    assert configure_mlflow(settings) is False
+    assert os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] == str(MLFLOW_REQUEST_RETRIES)
+    assert os.environ["MLFLOW_DISABLE_TELEMETRY"] == "true"
+
+
+def test_the_audit_callback_does_not_displace_other_callbacks(settings, configured_dspy):
+    """Regression: configuring ours removed MLflow's, so traces arrived empty."""
+
+    class Bystander(BaseCallback):
+        pass
+
+    bystander = Bystander()
+    dspy.configure(callbacks=[bystander])
+
+    install_audit_callback(settings)
+    callbacks = list(dspy.settings.callbacks)
+    assert bystander in callbacks, "someone else's callback was thrown away"
+    assert sum(isinstance(cb, DecisionAuditCallback) for cb in callbacks) == 1
+
+    install_audit_callback(settings)
+    assert sum(isinstance(cb, DecisionAuditCallback) for cb in dspy.settings.callbacks) == 1, "installed twice"

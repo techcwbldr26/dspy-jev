@@ -24,15 +24,17 @@ from dspy_jev.decisions import decision_record
 from dspy_jev.lm import MissingCredentialError, build_lm, describe_lm
 from dspy_jev.observability import (
     METRICS,
-    DecisionAuditCallback,
     configure_observability,
+    install_audit_callback,
     policy_span,
 )
 from dspy_jev.program import ActionGateProgram, TicketTriageProgram
 from dspy_jev.service.dashboard import (
     DecisionLog,
     calibration_summary,
+    effective_threshold,
     lens_rows,
+    observability_summary,
     threshold_tradeoff,
 )
 from dspy_jev.service.schemas import (
@@ -76,7 +78,7 @@ class AppState:
     def start(self) -> None:
         """Wire observability, resolve the LM, load the calibration artifact."""
         configure_observability(self.settings)
-        dspy.configure(callbacks=[DecisionAuditCallback(self.settings)])
+        install_audit_callback(self.settings)
         if self.lm is None:
             try:
                 self.lm = build_lm("decision", settings=self.settings)
@@ -281,11 +283,17 @@ def create_app(
             "calibrated": state.calibrated,
             "policy": {
                 "autonomy_threshold": state.gate.autonomy_threshold,
+                "effective_threshold": effective_threshold(state.gate),
                 "max_risk_level": state.gate.max_risk_level,
                 "max_blast_level": state.gate.max_blast_level,
             },
             **calibration_summary(settings, fields=dict(state.gate.gate.fields)),
         }
+
+    @app.get("/v1/observability", tags=["dashboard"], dependencies=[Depends(require_api_key)])
+    async def observability() -> dict[str, Any]:
+        """Throughput, latency and which observability sinks are live."""
+        return observability_summary(settings, state.decisions)
 
     @app.get("/v1/lens", tags=["dashboard"], dependencies=[Depends(require_api_key)])
     async def lens(
@@ -305,7 +313,9 @@ def create_app(
             except Exception as exc:  # reported to the dashboard rather than crashing it
                 logger.exception("lens.failed")
                 raise HTTPException(status_code=502, detail=f"lens failed: {exc}") from exc
-        cut = state.gate.autonomy_threshold if threshold is None else threshold
+        # Default to the bar an action must actually clear, not just the policy
+        # floor -- the fitted Noul threshold can be higher, and usually is.
+        cut = effective_threshold(state.gate) if threshold is None else threshold
         return {
             **state._lens,
             "threshold": cut,
