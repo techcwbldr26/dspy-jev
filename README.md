@@ -133,17 +133,28 @@ safe on one row and unsafe on the other. A draggable line is the threshold.
 Drag it and the verdicts change — but nothing is re-run. The probabilities are
 already in; only the local cut moves. Two counts trade against each other as you
 drag. The screenshots below are from a real run against `glm-5.3` on Ollama
-Cloud, over the 40 labelled actions in `data/action_gate.jsonl`.
+Cloud, over the 140 labelled actions in `data/action_gate.jsonl`.
 
-At the calibrated threshold of `0.90`, the two error counts are both zero —
-nothing unsafe gets through, and nothing safe is stopped:
+At the calibrated threshold of `0.89`, one unsafe action slips through and six
+safe ones are stopped:
 
-![The lens at the calibrated threshold of 0.90](docs/images/lens-threshold-090.png)
+![The lens at the calibrated threshold of 0.89](docs/images/lens-threshold-089.png)
 
-Drag it down to `0.55` and **five unsafe actions slip through**, at no saving in
-friction, because there was no friction to save:
+Drag it down to `0.75` and the friction disappears — nothing safe is blocked —
+but **eleven unsafe actions get through**:
 
-![The lens with the threshold dragged to 0.55](docs/images/lens-threshold-055.png)
+![The lens with the threshold dragged to 0.75](docs/images/lens-threshold-075.png)
+
+Push it to `0.95` and nothing unsafe survives, at the cost of stopping eleven
+safe actions. There is no setting with zero of both, and that is the point: the
+threshold is where you choose which error you would rather have.
+
+| Threshold | Unsafe slips through | Safe blocked needlessly |
+|---|---|---|
+| 0.75 | 11 | 0 |
+| 0.85 | 9 | 4 |
+| **0.89** (fitted) | **1** | **6** |
+| 0.95 | 0 | 11 |
 
 That trade-off is the whole of calibration, and it is the one thing a log line
 cannot show you.
@@ -262,7 +273,7 @@ Full walkthrough: [`docs/observability.md`](docs/observability.md).
 | | |
 |---|---|
 | **Jev decision types are experimental** | `Noul`, `Score`, `Choice`, `TypeSafe` and `ReAnchor` may change without warning. DSPy is pinned to `3.4.0` for that reason, and the golden contract tests exist partly to catch it. |
-| **It needs labelled data** | 40 examples ship, but they are an example, not your policy. Without your own rows, calibration fits someone else's judgement. |
+| **It needs labelled data** | 140 examples ship, but they are an example, not your policy. Without your own rows, calibration fits someone else's judgement. |
 | **The probabilities are not calibrated in the statistical sense** | `P(True) = 0.7` does not mean it is right 70 % of the time. `Noul.confidence` is distance from the threshold, not a calibrated probability. Treat both as *orderings*, not as frequencies. |
 | **Another hop on the critical path** | The gate sits in front of every risky step. It adds latency, and it can be down. The cache and the "do not call it for in-scope reads" rule are the mitigations. |
 | **Two artifacts to keep in step** | Open-weight and Claude backends produce differently-shaped distributions, so each harness family needs its own calibration and its own recalibration. |

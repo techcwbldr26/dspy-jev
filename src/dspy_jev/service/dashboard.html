@@ -86,6 +86,8 @@
   .tick { font-size:11px; fill:var(--muted); font-variant-numeric:tabular-nums; }
   .zone-label { font-size:12px; font-weight:600; }
   .zone-sub { font-size:11px; fill:var(--ink-2); }
+  .zone-label, .zone-sub, .lane-label { paint-order:stroke fill; stroke:var(--surface); stroke-width:3.5px;
+    stroke-linejoin:round; }
   .dot { fill:var(--series); stroke:var(--surface); stroke-width:2; cursor:pointer; }
   .dot.err { fill:var(--critical); }
   .dot:hover { stroke:var(--ink); }
@@ -354,12 +356,16 @@
     p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.unsafe - 3}" text-anchor="end">Labelled unsafe</text>`);
     p.push(`<text class="lane-label" x="${M.l - 14}" y="${LANE.unsafe + 13}" text-anchor="end" opacity=".7">${tr.unsafe} actions</text>`);
 
-    // zone labels — direct-labelled counts, so colour never carries the count
-    p.push(`<text class="zone-label" x="${M.l + 8}" y="${top + 15}" fill="var(--ink-2)">${tr.falseHolds} blocked needlessly</text>`);
-    p.push(`<text class="zone-sub" x="${M.l + 8}" y="${top + 30}">safe work you'd stop — friction</text>`);
-    p.push(`<text class="zone-label" x="${W - M.r - 8}" y="${bot - 27}" text-anchor="end"
-             fill="var(--critical)">${tr.falseAllows} would slip through</text>`);
-    p.push(`<text class="zone-sub" x="${W - M.r - 8}" y="${bot - 12}" text-anchor="end">unsafe work you'd allow — the dangerous error</text>`);
+    // Zone labels carry the counts, so they are drawn after the dots and given a
+    // halo: with 140 rows the marks reach the corners, and a count hidden behind
+    // a dot is the one number on this chart a reader cannot do without.
+    const zoneLabels = [
+      `<text class="zone-label" x="${M.l + 8}" y="${top + 15}" fill="var(--ink-2)">${tr.falseHolds} blocked needlessly</text>`,
+      `<text class="zone-sub" x="${M.l + 8}" y="${top + 30}">safe work you'd stop — friction</text>`,
+      `<text class="zone-label" x="${W - M.r - 8}" y="${bot - 27}" text-anchor="end"
+        fill="var(--critical)">${tr.falseAllows} would slip through</text>`,
+      `<text class="zone-sub" x="${W - M.r - 8}" y="${bot - 12}" text-anchor="end">unsafe work you'd allow — the dangerous error</text>`,
+    ];
 
     // threshold
     p.push(`<line class="thr-line" x1="${tx}" y1="${top - 8}" x2="${tx}" y2="${bot + 4}"/>`);
@@ -376,6 +382,7 @@
                aria-label="${esc(r.action)}. Labelled ${r.label_safe ? "safe" : "unsafe"}. Probability ${fmt(prob)}."/>`);
     });
 
+    p.push(...zoneLabels);
     svg.innerHTML = p.join("");
     svg.querySelectorAll(".dot").forEach((el) => {
       const r = pts[+el.dataset.i];
