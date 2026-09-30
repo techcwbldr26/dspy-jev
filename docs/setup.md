@@ -178,7 +178,7 @@ dspy-jev calibrate --dataset data/action_gate.jsonl
 
 What this does, precisely:
 
-1. Sends each of the 40 labelled example actions to the model and asks *how
+1. Sends each of the 140 labelled example actions to the model and asks *how
    likely* each is to be safe. The answers are cached.
 2. Scores the current rule against the human labels, weighted so that letting an
    unsafe action through costs more than blocking a safe one.

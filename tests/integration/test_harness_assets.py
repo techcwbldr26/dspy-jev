@@ -7,6 +7,7 @@ fails silently at startup. These are cheap tests that catch both.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -301,37 +302,46 @@ DOCS = REPO_ROOT / "docs"
 IMAGES = DOCS / "images"
 
 
+IMAGE_LINK = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+MARKDOWN = [*DOCS.rglob("*.md"), REPO_ROOT / "README.md"]
+
+
+def _image_links() -> list[tuple[Path, str]]:
+    """Every local image the documentation references, as (document, target).
+
+    Discovered rather than listed. A hard-coded roster of filenames rots the
+    moment a screenshot is renamed -- and it did: the lens screenshots were
+    re-captured at new thresholds and this test still named the old file, so
+    the breakage surfaced in CI instead of in the change that caused it.
+    """
+    found = []
+    for doc in MARKDOWN:
+        for target in IMAGE_LINK.findall(doc.read_text(encoding="utf-8")):
+            if not target.startswith("http"):
+                found.append((doc, target))
+    return found
+
+
 @pytest.mark.parametrize(
-    "name",
-    [
-        "setup-1-open-environment.png",
-        "setup-2-network-access.png",
-        "setup-3-api-credentials.png",
-        "setup-4-add-credential.png",
-        "console-light.png",
-        "console-dark.png",
-        "lens-threshold-055.png",
-        "policy-chain.png",
-    ],
+    ("doc", "target"),
+    _image_links(),
+    ids=lambda v: v if isinstance(v, str) else v.name,
 )
-def test_every_documented_image_exists(name: str):
-    path = IMAGES / name
-    assert path.exists(), f"missing {path}"
-    assert path.stat().st_size > 5_000, f"{name} looks truncated"
+def test_every_documented_image_exists(doc: Path, target: str):
+    path = (doc.parent / target).resolve()
+    assert path.exists(), f"{doc.relative_to(REPO_ROOT)} links to a missing {target}"
+    assert path.stat().st_size > 5_000, f"{target} looks truncated"
 
 
-def test_no_markdown_link_points_at_a_missing_image():
-    """A broken image in a setup guide is worse than no image."""
-    import re
+def test_the_setup_screenshots_are_still_in_the_guide():
+    """Deriving the list above means a deleted reference would go unnoticed.
 
-    missing = []
-    for doc in [*DOCS.rglob("*.md"), REPO_ROOT / "README.md"]:
-        for target in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", doc.read_text(encoding="utf-8")):
-            if target.startswith("http"):
-                continue
-            if not (doc.parent / target).resolve().exists():
-                missing.append(f"{doc.relative_to(REPO_ROOT)} -> {target}")
-    assert not missing, "broken image links:\n" + "\n".join(missing)
+    These four are the ones a first-time reader needs to find the two cloud
+    settings, so their presence is asserted by name rather than discovered.
+    """
+    text = (DOCS / "setup.md").read_text(encoding="utf-8")
+    for n in range(1, 5):
+        assert f"images/setup-{n}-" in text, f"setup step {n} lost its screenshot"
 
 
 def test_the_setup_guide_covers_both_cloud_settings():

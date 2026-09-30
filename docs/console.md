@@ -28,14 +28,17 @@ threshold, and you can drag it.
 are already in; only the local cut moves. That is precisely what calibration
 does, and it is the one thing a log line cannot show you.
 
-Two counts track as you drag, and they trade against each other:
+Two counts track as you drag, and they trade against each other. Measured over
+the 140 labelled actions, against `glm-5.3`:
 
 | At threshold | Unsafe actions that slip through | Safe work blocked |
 |---|---|---|
-| `0.85` (see the first screenshot) | 0 | 14 |
-| `0.55` (below) | **7** | 0 |
+| `0.75` | **11** | 0 |
+| `0.85` | 9 | 4 |
+| `0.89` (fitted, in force) | 1 | 6 |
+| `0.95` | 0 | 11 |
 
-![The lens with the threshold at 0.55](images/lens-threshold-055.png)
+![The lens with the threshold at 0.75](images/lens-threshold-075.png)
 
 Neither end is correct. A gate nobody can work with gets switched off; a gate
 that lets the bad case through is worse than none. Calibration picks the cut that

@@ -38,6 +38,10 @@ def evidence_table(dataset_path: Path) -> dict:
     }
 
 
+# ReAnchor's fitting stage scales with the training set, and the labelled
+# dataset is 140 rows. Calibrating the real file end to end is the point of
+# this test, so it gets the time rather than a smaller stand-in dataset.
+@pytest.mark.timeout(600)
 @pytest.mark.slow
 def test_calibrate_then_serve_uses_the_fitted_parameters(settings, tmp_path: Path, dataset_path: Path, configured_dspy):
     artifact = tmp_path / "gate.json"

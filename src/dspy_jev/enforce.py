@@ -452,9 +452,11 @@ class Enforcer:
             import dspy
 
             from dspy_jev.lm import build_lm
+            from dspy_jev.observability import install_audit_callback
             from dspy_jev.program import ActionGateProgram
 
             dspy.configure(lm=build_lm("decision", settings=self._settings))
+            install_audit_callback(self._settings)
             gate = ActionGateProgram(settings=self._settings)
             gate.load_calibration()
             self._gate = gate
