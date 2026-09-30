@@ -20,10 +20,13 @@ class MissingCredentialError(RuntimeError):
 def _credential_hint(provider: models.Provider) -> str:
     if provider == "ollama_cloud":
         return (
-            "Set OLLAMA_API_KEY. Create a key at https://ollama.com/settings/keys, then "
-            "`export OLLAMA_API_KEY=...` (or add it to .env)."
+            "Either set OLLAMA_API_KEY (create one at https://ollama.com/settings/keys), or, "
+            "if your platform injects the Authorization header for ollama.com, set "
+            "DSPY_JEV_AUTH_MODE=proxy."
         )
-    return "Set ANTHROPIC_API_KEY, or run inside a harness that injects it."
+    return (
+        "Either set ANTHROPIC_API_KEY, or set DSPY_JEV_AUTH_MODE=proxy if the Authorization header is injected for you."
+    )
 
 
 def build_lm(

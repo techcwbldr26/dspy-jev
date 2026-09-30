@@ -11,10 +11,13 @@ step "setting up the $HARNESS harness (Claude models)"
 
 "$DSPY_JEV_ROOT/scripts/install.sh" "service,observability,mcp"
 
-require_key ANTHROPIC_API_KEY "Create one at https://console.anthropic.com/settings/keys" || true
+AUTH_MODE="$(detect_auth_mode ANTHROPIC_API_KEY)"
+require_key ANTHROPIC_API_KEY "Create one at https://console.anthropic.com/settings/keys" "$AUTH_MODE" || true
+network_note
 
 write_env_file "$HARNESS" \
   "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+  "DSPY_JEV_AUTH_MODE=$AUTH_MODE" \
   "DSPY_JEV_DECISION_MODEL=claude-sonnet-5-5" \
   "DSPY_JEV_FAST_MODEL=claude-haiku-4-5-20251001" \
   "DSPY_JEV_JUDGE_MODEL=claude-opus-5-5" \
@@ -72,6 +75,9 @@ Make sure the venv's bin directory is on PATH, since .mcp.json launches the
 'dspy-jev' command:
     export PATH="$VENV_DIR/bin:\$PATH"
 
-Calibrate this harness separately -- it has its own artifact:
+Confirm the provider really answers, then calibrate this harness (it has its
+own artifact), then look at it:
+    dspy-jev doctor --probe
     DSPY_JEV_HARNESS=claude-code dspy-jev calibrate
+    dspy-jev serve            # console at http://127.0.0.1:8080
 NEXT

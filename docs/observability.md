@@ -5,6 +5,30 @@ Three layers, each usable alone. Following the
 with `inspect_history`, move to tracing when one call is not enough, and add
 callbacks when you need something the framework does not capture.
 
+## 0. The console — start here
+
+```bash
+dspy-jev serve            # then open http://127.0.0.1:8080
+```
+
+Served by the gate itself at `/`, so it shares an origin with the API and needs
+no build step, no package install and no network. It answers the three questions
+the other layers cannot:
+
+| Panel | What it answers |
+|---|---|
+| Threshold lens | Where is the cut, and which labelled actions fall on the wrong side of it? |
+| Policy chain | For *this* decision, which of the six conditions failed, and by how much? |
+| Recent decisions | What has the gate been doing? |
+| Calibration in force | Which fitted parameters are live, and what did fitting them buy? |
+
+Dragging the threshold recomputes every verdict in the browser from probabilities
+already fetched — no model call. That is the point: it makes the local, reviewable
+nature of calibration something you can feel rather than read about.
+
+The feed is in memory only and bounded. The action text is the user's data; the
+durable record is the audit log below, which redacts.
+
 ## 1. `inspect_history` — the first thing to try
 
 ```python

@@ -26,6 +26,7 @@ htmlcov/
 # Observability and DSPy caches
 .mlflow/
 mlruns/
+mlflow.db
 .dspy_cache/
 
 # Calibration output (artifacts are environment-specific; commit deliberately)

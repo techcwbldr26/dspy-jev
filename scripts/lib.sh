@@ -82,18 +82,57 @@ write_env_file() {
   ok "wrote $env_file (mode 600)"
 }
 
+# Detect how this environment authenticates, so the generated .env matches it.
+#
+#   key   -- the key is in this environment and we send it.
+#   proxy -- the platform injects the Authorization header and never shows us the
+#            key. Claude Code's cloud "API credentials" work this way.
+#
+# Set DSPY_JEV_AUTH_MODE yourself to skip the guess.
+detect_auth_mode() {
+  local key_var="$1"
+  if [[ -n "${DSPY_JEV_AUTH_MODE:-}" ]]; then
+    echo "$DSPY_JEV_AUTH_MODE"
+  elif [[ -n "${!key_var:-}" ]]; then
+    echo "key"
+  else
+    echo "proxy"
+  fi
+}
+
 require_key() {
-  # require_key <VAR_NAME> <where to get one>
-  local name="$1" hint="$2"
+  # require_key <VAR_NAME> <where to get one> <auth mode>
+  local name="$1" hint="$2" mode="${3:-key}"
+  if [[ "$mode" == "proxy" ]]; then
+    ok "auth mode: proxy — the platform supplies the Authorization header"
+    warn "No $name in this environment. That is expected when the platform injects it."
+    warn "If that is NOT your setup, export $name and re-run. $hint"
+    return 0
+  fi
   if [[ -z "${!name:-}" ]]; then
     warn "$name is not set. $hint"
-    warn "Export it, or add it to $DSPY_JEV_ROOT/.env, before running 'dspy-jev doctor'."
+    warn "Export it, or set DSPY_JEV_AUTH_MODE=proxy if your platform injects the header."
     return 1
   fi
-  ok "$name is set"
+  ok "$name is set (auth mode: key)"
+}
+
+# Cloud sessions often allow the model host separately from supplying the key.
+# Saying so here costs one line and saves a confusing 403 later.
+network_note() {
+  cat <<'NOTE'
+
+  Running in a Claude Code cloud session? Two settings, not one:
+    1. Network access must allow ollama.com  (otherwise: "proxy refused CONNECT … 403")
+    2. The key goes under API credentials, not Environment variables
+  Both are in the cloud environment menu -> Edit, and apply to NEW sessions.
+  Walkthrough with screenshots: docs/setup.md
+NOTE
 }
 
 run_doctor() {
   step "running dspy-jev doctor"
   "$VENV_DIR/bin/dspy-jev" doctor "$@" || warn "doctor reported failures; see the output above"
+  warn "This checked the paperwork only. To prove the provider actually answers:"
+  warn "    dspy-jev doctor --probe"
 }

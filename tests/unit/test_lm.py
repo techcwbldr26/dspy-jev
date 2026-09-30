@@ -83,3 +83,27 @@ def test_configure_dspy_installs_the_lm(settings: Settings, configured_dspy):
 
     lm = configure_dspy("decision", settings=settings)
     assert dspy.settings.lm is lm
+
+
+# --- platform-injected auth -------------------------------------------------------
+
+
+def test_proxy_mode_builds_an_lm_without_a_key():
+    """Claude Code's API credentials never expose the key to this process."""
+    from dspy_jev.config import PROXY_AUTH_PLACEHOLDER
+
+    lm = build_lm("decision", settings=Settings(harness="pi", auth_mode="proxy"))
+    assert lm.kwargs["api_key"] == PROXY_AUTH_PLACEHOLDER
+    assert lm.kwargs["api_base"] == "https://ollama.com/v1/"
+
+
+def test_key_mode_still_refuses_without_a_key():
+    with pytest.raises(MissingCredentialError):
+        build_lm("decision", settings=Settings(harness="pi"))
+
+
+def test_the_missing_credential_hint_names_both_ways_out():
+    with pytest.raises(MissingCredentialError) as exc:
+        build_lm("decision", settings=Settings(harness="pi"))
+    assert "OLLAMA_API_KEY" in str(exc.value)
+    assert "DSPY_JEV_AUTH_MODE=proxy" in str(exc.value)

@@ -56,6 +56,39 @@ def _fetch_ollama_tags(timeout: float = 15.0) -> list[str]:
     return names
 
 
+def _probe_provider(settings: Settings) -> tuple[bool, str]:
+    """Send one tiny real request and report whether authentication worked.
+
+    The only way to tell a working key from a well-formed one -- and the only way
+    to know whether a platform-injected Authorization header is actually reaching
+    the provider.
+    """
+    import dspy
+
+    from dspy_jev.lm import build_lm
+
+    try:
+        lm = build_lm("fast", settings=settings, max_tokens=8, cache=False)
+    except Exception as exc:  # reported to the caller, not raised
+        return False, f"{type(exc).__name__}: {exc}"
+    try:
+        with dspy.context(lm=lm):
+            lm("Reply with the single word: ok")
+    except Exception as exc:  # reporting this is the whole point of a probe
+        detail = str(exc)
+        if "401" in detail or "invalid_api_key" in detail or "Unauthorized" in detail:
+            hint = (
+                " -- the credential was rejected. In key mode check OLLAMA_API_KEY; in proxy "
+                "mode check that the platform allows this host and injects Authorization."
+            )
+        elif "404" in detail:
+            hint = " -- model not found. Run `dspy-jev models --live` for the served tags."
+        else:
+            hint = ""
+        return False, f"{type(exc).__name__}: {detail[:300]}{hint}"
+    return True, f"{lm.model} answered"
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Check everything a harness needs before its first decision."""
     settings = _settings_from_args(args)
@@ -67,16 +100,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     check("harness", True, settings.harness)
     check("provider", True, settings.provider)
 
+    check("auth.mode", True, settings.auth_description)
     key = settings.api_key_for()
     check(
         "credentials",
         bool(key),
-        "present"
+        settings.auth_description
         if key
         else (
-            "set OLLAMA_API_KEY (https://ollama.com/settings/keys)"
+            "set OLLAMA_API_KEY (https://ollama.com/settings/keys), or DSPY_JEV_AUTH_MODE=proxy "
+            "if the platform injects the Authorization header"
             if settings.provider == "ollama_cloud"
-            else "set ANTHROPIC_API_KEY"
+            else "set ANTHROPIC_API_KEY, or DSPY_JEV_AUTH_MODE=proxy"
         ),
     )
 
@@ -103,6 +138,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         artifact.exists(),
         str(artifact) if artifact.exists() else f"no artifact at {artifact}; run `dspy-jev calibrate`",
     )
+
+    if args.probe:
+        check("provider.probe", *_probe_provider(settings))
 
     for module, extra in (("fastapi", "service"), ("mlflow", "observability"), ("mcp", "mcp")):
         try:
@@ -369,6 +407,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="Verify credentials, models, calibration and optional extras.")
     doctor.add_argument("--offline", action="store_true", help="Skip the live Ollama Cloud model listing.")
+    doctor.add_argument(
+        "--probe",
+        action="store_true",
+        help="Send one tiny real request to prove authentication works end to end.",
+    )
     doctor.set_defaults(func=cmd_doctor)
 
     models_cmd = sub.add_parser("models", help="List the model registry.")

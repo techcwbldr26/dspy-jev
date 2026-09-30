@@ -51,6 +51,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 dspy_jev = ["py.typed"]
+"dspy_jev.service" = ["dashboard.html"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
